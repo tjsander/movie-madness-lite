@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Movie Madness Lite</title>
 <meta name="description" content="Search and browse the Movie Madness (Portland) rental catalog, shelf by shelf.">
+<link rel="icon" type="image/png" href="img/M.png">
 <link rel="preconnect" href="https://image.tmdb.org">
 <link rel="preload" href="data/catalog.json" as="fetch" crossorigin>
 <link rel="preload" href="data/posters.json" as="fetch" crossorigin>
@@ -247,6 +248,7 @@ h2.label a { color: inherit; text-decoration: none; } h2.label a:hover { color: 
 .rail .split { margin: 18px 8px 0; font-size: 10px; }
 .more-labels { margin: -12px 0 20px; font-size: 13px; font-weight: 600; }
 .more-labels a { color: var(--accent); text-decoration: none; }
+.more-labels small { color: var(--muted); font-weight: 400; }
 .scope { margin: -2px 0 6px; font-size: 14px; color: var(--muted); }
 .scope a { margin-left: 8px; color: var(--accent); font-weight: 600; text-decoration: none; }
 .rail-empty { color: var(--muted); padding: 4px 8px; }
@@ -254,6 +256,11 @@ h2.label a { color: inherit; text-decoration: none; } h2.label a:hover { color: 
 
 footer { border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; padding: 18px 16px 30px; max-width: 1500px; margin: 0 auto; }
 footer p { margin: 4px 0; }
+/* TMDB's logo, as their API terms ask, kept smaller than the site's own name */
+.tmdb-credit { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; margin: 10px 0 !important; }
+.tmdb-credit img { display: block; height: 12px; width: auto; }
+.tmdb-link { display: inline-flex; align-items: center; gap: 5px; }
+.tmdb-link img { height: 14px; width: auto; }
 .loading { padding: 80px 0; text-align: center; color: var(--muted); }
 </style>
 </head>
@@ -294,7 +301,7 @@ footer p { margin: 4px 0; }
 <footer>
   <p id="stamp"></p>
   <p>An unaffiliated fan project, not endorsed by or connected with <a href="https://www.moviemadness.org/">Movie Madness</a>. Catalog listings are the property of Movie Madness; being listed doesn't mean a copy is on the shelf today. Data from <a href="https://github.com/tjsander/movie-madness-pdx-tmdb">movie-madness-pdx-tmdb</a>.</p>
-  <p>This product uses the <a href="https://www.themoviedb.org/">TMDB</a> API but is not endorsed or certified by TMDB.</p>
+  <p class="tmdb-credit"><a href="https://www.themoviedb.org/"><img src="img/tmdb_long.svg" alt="The Movie Database (TMDB)" width="120" height="16"></a> This product uses the TMDB API but is not endorsed or certified by TMDB.</p>
   <p>Searching for an actor or director finds only the titles on their named shelves (like "KUROSAWA, AKIRA"), not every film they're in. To see which of their films Movie Madness has, browse them on <a href="https://letterboxd.com/">Letterboxd</a> with the <a href="https://github.com/tjsander/mmboxmonkey">mmboxmonkey</a> script, which adds Movie Madness availability to Letterboxd film pages.</p>
   <p>Made by <a href="https://github.com/tjsander">Travis J. Sanders</a>.</p>
 </footer>
@@ -325,6 +332,10 @@ let displays = [];   // [{name, works:[i]}]
 let collections = [];     // website-only categories: [{group, name, works:[i], byWork: Map(i -> Set(rental j))}]
 const rentalColl = new Map();  // "work:rental" -> its collection
 const BOUTIQUE = "Boutique Blu-rays";
+// "Up front" displays given a row on the home page, in this order; the rest get a link line.
+// Boutique labels given a row on the home page; every label still gets a link above them.
+const HOME_LABELS = ["Criterion Collection"];
+const HOME_DISPLAYS = ["New Arrival", "New Release", "New Release (Foreign)", "Staff Picks", "Curated"];
 let byKey = new Map();
 const state = { fmt: "", kind: "", match: "" };  // match: "" all, "m" matched to TMDB, "u" unmatched
 let io;              // shared IntersectionObserver for lazy shelf rows
@@ -647,16 +658,20 @@ function viewHome() {
   const { colls } = tally();
   if (colls.length) {
     html += `<h2 class="label"><a href="#/boutique">${BOUTIQUE}</a></h2>${labelChips(colls)}`;
-    for (const { c, list } of colls.slice(0, 4)) { html += shelfRow(c.name, hrefLabel(c.name), list, null); specs.push({ list, where: { coll: c } }); }
-    if (colls.length > 4) html += `<p class="more-labels"><a href="#/boutique">All ${colls.length} labels →</a></p>`;
+    for (const { c, list } of colls.filter(x => HOME_LABELS.includes(x.c.name))) { html += shelfRow(c.name, hrefLabel(c.name), list, null); specs.push({ list, where: { coll: c } }); }
+    html += `<p class="more-labels"><a href="#/boutique">All ${colls.length} labels →</a></p>`;
     html += `<div class="split">In the store</div>`;
   }
-  const front = displays.map(d => ({ d, list: visible(d.works, { display: C.displays.indexOf(d.name) }) })).filter(x => x.list.length);
-  if (front.length) html += `<h2 class="label">Up front</h2>`;
+  const all = displays.map(d => ({ d, list: visible(d.works, { display: C.displays.indexOf(d.name) }) })).filter(x => x.list.length);
+  const front = HOME_DISPLAYS.map(n => all.find(x => x.d.name.toLowerCase() === n.toLowerCase())).filter(Boolean);
+  const rest = all.filter(x => !front.includes(x));
+  if (all.length) html += `<h2 class="label">Up front</h2>`;
   for (const { d, list } of front) {
     html += shelfRow(d.name, hrefDisplay(d.name), list, null);
     specs.push({ list, where: { display: C.displays.indexOf(d.name) } });
   }
+  // The other displays stay one tap away (phones have no sidebar).
+  if (rest.length) html += `<p class="more-labels">More up front: ${rest.map(({ d, list }) => `<a href="${hrefDisplay(d.name)}">${esc(d.name)}</a> <small>${list.length.toLocaleString()}</small>`).join(" · ")}</p>`;
   html += `<h2 class="label">Sections</h2><div class="dir">${tally().areas.map(areaCard).join("")}</div>`;
   main.innerHTML = html;
   lazyRows(main, specs);
@@ -1005,7 +1020,7 @@ async function openModal(code) {
       <h2>${esc(w.t)}</h2>${w.o ? `<div class="meta"><i>${esc(w.o)}</i></div>` : ""}<div class="meta">${esc(meta)}</div>
       ${d && d.overview ? `<p class="ov">${esc(d.overview)}</p>` : ""}
       <ul class="rentals">${rentals}</ul>
-      <div class="links">${w.k === 2 ? unmatchedLinks(w, d) : `<a href="https://www.themoviedb.org/${kind}/${w.id}" target="_blank" rel="noopener">TMDB ↗</a>
+      <div class="links">${w.k === 2 ? unmatchedLinks(w, d) : `<a class="tmdb-link" href="https://www.themoviedb.org/${kind}/${w.id}" target="_blank" rel="noopener"><img src="img/tmdb_square.svg" alt="" width="22" height="16">TMDB ↗</a>
       ${w.k ? "" : `<a href="https://letterboxd.com/tmdb/${w.id}/" target="_blank" rel="noopener">Letterboxd ↗</a>`}`}</div>
     </div></div>`;
   };

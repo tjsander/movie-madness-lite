@@ -89,11 +89,11 @@ def area_of(section, sections):
 
 
 # Website-only curated categories, which the store doesn't shelve this way.
-# Boutique Blu-rays: HD copies whose store title names a boutique label in its edition notes,
+# Boutique labels: DVD, Blu-ray and 4K copies whose store title names a boutique label in its edition notes,
 # e.g. "Kuffs (Shout Select) (Blu-Ray)". Labels with fewer than MIN_LABEL_TITLES titles share
 # "Other boutique labels".
-BOUTIQUE = "Boutique Blu-rays"
-BOUTIQUE_FORMATS = {"4K UHD", "Blu-Ray 3D", "Blu-Ray"}
+BOUTIQUE = "Boutique Labels"
+BOUTIQUE_FORMATS = {"4K UHD", "Blu-Ray 3D", "Blu-Ray", "DVD"}
 MIN_LABEL_TITLES = 5
 LABELS = [
     ("Criterion Collection", r"criterion|crit\b\.?(\s*set)?"),

@@ -1,0 +1,1121 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Movie Madness Lite</title>
+<meta name="description" content="Search and browse the Movie Madness (Portland) rental catalog, shelf by shelf.">
+<link rel="preconnect" href="https://image.tmdb.org">
+<link rel="preload" href="data/catalog.json" as="fetch" crossorigin>
+<link rel="preload" href="data/posters.json" as="fetch" crossorigin>
+<style>
+:root {
+  --bg: #f6f3ee; --panel: #fffdf9; --ink: #1c1917; --muted: #6b6259; --line: #e4ddd3;
+  --accent: #c8102e; --accent-ink: #fff; --tag: #f5c518; --tag-ink: #1c1917;
+  --ledge: #8a6a4a; --tile: #e9e3da; --focus: #2563eb;
+  --shadow: 0 1px 2px rgb(0 0 0 / .08), 0 4px 14px rgb(0 0 0 / .06);
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #121012; --panel: #1b181b; --ink: #f2ede6; --muted: #a59c92; --line: #2e292d;
+    --accent: #ff4757; --accent-ink: #160407; --tag: #f5c518; --tag-ink: #1c1917;
+    --ledge: #5b4532; --tile: #262126; --focus: #7aa2ff;
+    --shadow: 0 1px 2px rgb(0 0 0 / .4), 0 6px 18px rgb(0 0 0 / .35);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #121012; --panel: #1b181b; --ink: #f2ede6; --muted: #a59c92; --line: #2e292d;
+  --accent: #ff4757; --accent-ink: #160407; --tag: #f5c518; --tag-ink: #1c1917;
+  --ledge: #5b4532; --tile: #262126; --focus: #7aa2ff;
+  --shadow: 0 1px 2px rgb(0 0 0 / .4), 0 6px 18px rgb(0 0 0 / .35);
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0; background: var(--bg); color: var(--ink);
+  font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+a { color: inherit; }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+button { font: inherit; color: inherit; }
+
+/* header */
+header {
+  position: sticky; top: 0; z-index: 20; background: var(--bg);
+  border-bottom: 1px solid var(--line);
+}
+.bar { display: flex; gap: 12px; align-items: center; padding: 10px 16px; max-width: 1500px; margin: 0 auto; flex-wrap: wrap; }
+.brand {
+  display: flex; align-items: baseline; gap: 6px; text-decoration: none; white-space: nowrap;
+  font-weight: 900; letter-spacing: -.02em; font-size: 20px; text-transform: uppercase;
+}
+.brand b { color: var(--accent); }
+.brand small { font-size: 11px; font-weight: 700; letter-spacing: .14em; color: var(--muted); }
+.search { flex: 1 1 320px; position: relative; min-width: 0; }
+.search input {
+  width: 100%; font: inherit; font-size: 16px; padding: 10px 40px 10px 14px; border-radius: 10px;
+  border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+}
+.search input:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-color: transparent; }
+.search kbd {
+  position: absolute; right: 10px; top: 50%; translate: 0 -50%; font: 12px/1 ui-monospace, monospace;
+  border: 1px solid var(--line); border-radius: 4px; padding: 3px 6px; color: var(--muted);
+}
+.filters { display: flex; gap: 6px; flex-wrap: wrap; }
+.seg { flex: none; display: inline-flex; border: 1px solid var(--line); border-radius: 999px; overflow: hidden; background: var(--panel); }
+.seg button { border: 0; background: none; padding: 6px 11px; font-size: 13px; cursor: pointer; white-space: nowrap; }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--bg); }
+/* dev view (?dev=1): extra filters for checking the data, hidden from everyone else */
+body:not(.dev) .dev-only { display: none; }
+.dev-badge { align-self: center; font-size: 12px; font-weight: 700; color: var(--accent); text-decoration: none; border: 1px dashed var(--accent); border-radius: 999px; padding: 4px 10px; white-space: nowrap; }
+
+/* layout */
+.wrap { display: grid; grid-template-columns: 240px minmax(0, 1fr); max-width: 1500px; margin: 0 auto; }
+nav.rail {
+  position: sticky; top: 61px; align-self: start; height: calc(100vh - 61px); overflow-y: auto;
+  padding: 14px 8px 40px 16px; border-right: 1px solid var(--line); font-size: 14px;
+}
+.rail h2 { font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); margin: 14px 8px 6px; }
+.rail a {
+  display: flex; justify-content: space-between; gap: 8px; padding: 4px 8px; border-radius: 6px;
+  text-decoration: none;
+}
+.rail a:hover { background: var(--tile); }
+.rail a[aria-current="page"] { background: var(--accent); color: var(--accent-ink); }
+.rail a span:last-child { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 12px; }
+.rail a[aria-current="page"] span:last-child { color: inherit; }
+main { padding: 16px 16px 60px; min-width: 0; }
+@media (max-width: 860px) {
+  header { position: static; }
+  .filters { width: 100%; }
+  .wrap { grid-template-columns: minmax(0, 1fr); }
+  nav.rail { display: none; }
+  .search kbd { display: none; }
+}
+
+/* headings + breadcrumbs */
+.crumbs { font-size: 13px; color: var(--muted); margin: 2px 0 4px; }
+.crumbs a { text-decoration: none; } .crumbs a:hover { text-decoration: underline; }
+h1 { font-size: 28px; line-height: 1.15; margin: 0 0 4px; letter-spacing: -.01em; }
+.sub { color: var(--muted); margin: 0 0 16px; font-size: 14px; }
+.toolbar { display: flex; gap: 10px; align-items: center; justify-content: space-between; flex-wrap: wrap; margin: 0 0 14px; }
+
+/* shelves */
+.shelf { margin: 0 0 26px; }
+.shelf-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.tag {
+  display: inline-block; background: var(--tag); color: var(--tag-ink); font-weight: 800; font-size: 12px;
+  letter-spacing: .06em; text-transform: uppercase; padding: 4px 10px; border-radius: 3px; text-decoration: none;
+  box-shadow: 0 1px 0 rgb(0 0 0 / .25); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+a.tag:hover { filter: brightness(1.06); text-decoration: underline; }
+.shelf-head .count { color: var(--muted); font-size: 13px; white-space: nowrap; }
+.shelf-head .more { margin-left: auto; font-size: 13px; font-weight: 600; color: var(--accent); text-decoration: none; white-space: nowrap; }
+.row {
+  display: grid; grid-auto-flow: column; grid-auto-columns: 124px; gap: 12px; overflow-x: auto;
+  padding: 2px 2px 10px; scroll-snap-type: x proximity; overscroll-behavior-x: contain;
+  border-bottom: 6px solid var(--ledge); border-radius: 0 0 2px 2px;
+  scrollbar-width: thin;
+}
+.row > * { scroll-snap-align: start; }
+.row.placeholder { height: 240px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(124px, 1fr)); gap: 18px 12px; }
+
+/* tiles */
+.tile { display: block; text-decoration: none; min-width: 0; }
+.poster {
+  position: relative; aspect-ratio: 2 / 3; border-radius: 4px; overflow: hidden; background: var(--tile);
+  box-shadow: var(--shadow); transition: transform .12s ease;
+}
+.tile:hover .poster { transform: translateY(-3px); }
+.poster img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.poster .noimg {
+  position: absolute; inset: 0; display: grid; place-items: center; padding: 10px; text-align: center;
+  font-weight: 700; font-size: 13px; color: var(--muted);
+}
+.fmts { position: absolute; left: 4px; bottom: 4px; display: flex; gap: 3px; flex-wrap: wrap; }
+.fmts i {
+  font: 700 9.5px/1 system-ui, sans-serif; font-style: normal; padding: 3px 4px; border-radius: 3px;
+  background: rgb(0 0 0 / .78); color: #fff; letter-spacing: .03em;
+}
+.fmts i.k { background: #f5c518; color: #111; } .fmts i.v { background: #7c3aed; }
+.badge {
+  position: absolute; top: 4px; right: 4px; background: var(--accent); color: var(--accent-ink);
+  font: 800 9.5px/1 system-ui, sans-serif; padding: 3px 5px; border-radius: 3px; text-transform: uppercase; letter-spacing: .04em;
+}
+.tile .t { font-size: 13px; font-weight: 600; margin-top: 6px; line-height: 1.25;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.tile .y { font-size: 12px; color: var(--muted); }
+
+/* section directory */
+.dir { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
+.dir > a {
+  display: flex; flex-direction: column; gap: 2px; padding: 12px 14px; border-radius: 8px; text-decoration: none;
+  background: var(--panel); border: 1px solid var(--line); border-left: 5px solid var(--accent);
+}
+.dir > a:hover, .dir .card:hover { border-color: var(--accent); }
+.dir b { font-size: 15px; } .dir .card > span, .dir summary > span:not(.caret) { color: var(--muted); font-size: 12px; }
+.chips { display: flex; gap: 6px; flex-wrap: wrap; margin: 0 0 18px; }
+.chips a {
+  font-size: 13px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel);
+  text-decoration: none; white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis;
+}
+.chips a:hover { border-color: var(--accent); }
+.chips a small { color: var(--muted); margin-left: 4px; }
+h2.label { font-size: 12px; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); margin: 26px 0 10px; }
+.empty { padding: 40px 0; color: var(--muted); text-align: center; }
+.sentinel { height: 1px; }
+
+/* modal */
+dialog {
+  width: min(760px, calc(100vw - 24px)); max-height: calc(100vh - 40px); padding: 0; border: 0; border-radius: 14px;
+  background: var(--panel); color: var(--ink); box-shadow: 0 20px 60px rgb(0 0 0 / .45);
+}
+dialog::backdrop { background: rgb(10 8 10 / .6); }
+.modal { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 20px; padding: 20px; }
+.modal .poster { box-shadow: none; }
+.modal h2 { margin: 0; font-size: 24px; line-height: 1.15; }
+.modal .meta { color: var(--muted); font-size: 14px; margin: 4px 0 10px; }
+.modal p.ov { margin: 0 0 14px; }
+.close {
+  position: absolute; top: 8px; right: 8px; width: 34px; height: 34px; border-radius: 50%; border: 0; cursor: pointer;
+  background: var(--tile); font-size: 20px; line-height: 1;
+}
+.rentals { list-style: none; padding: 0; margin: 0; border-top: 1px solid var(--line); }
+.rentals li { display: grid; grid-template-columns: 74px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.fmt-pill { font: 800 11px/1 system-ui, sans-serif; text-align: center; padding: 5px 0; border-radius: 4px; background: var(--ink); color: var(--bg); }
+.fmt-pill.k { background: #f5c518; color: #111; } .fmt-pill.v { background: #7c3aed; color: #fff; }
+.rentals .where { font-size: 13px; color: var(--muted); }
+.rentals .where a { color: var(--ink); font-weight: 600; }
+.rentals .ed { font-size: 13px; }
+.rentals .go { font-size: 13px; font-weight: 700; color: var(--accent); text-decoration: none; white-space: nowrap; }
+.links { display: flex; gap: 14px; font-size: 13px; margin-top: 12px; flex-wrap: wrap; }
+.links a { color: var(--muted); }
+@media (max-width: 600px) {
+  .modal { grid-template-columns: 1fr; }
+  .modal > .poster { width: 140px; }
+  .rentals li { grid-template-columns: 64px minmax(0, 1fr); }
+  .rentals .go { grid-column: 2; }
+  h1 { font-size: 23px; }
+}
+
+/* collapsible super-sections */
+details > summary { list-style: none; cursor: pointer; }
+details > summary::-webkit-details-marker { display: none; }
+.caret { display: inline-block; width: 0; height: 0; border: 5px solid transparent; border-left: 6px solid var(--muted); border-right: 0; transition: rotate .12s; flex: none; }
+details[open] > summary .caret { rotate: 90deg; }
+.rail details > summary { position: relative; }
+.rail details > summary::before {
+  content: ""; position: absolute; left: -9px; top: 11px; border: 4px solid transparent; border-left: 5px solid var(--muted); border-right: 0; transition: rotate .12s;
+}
+.rail details[open] > summary::before { rotate: 90deg; }
+.rail .sub-links { margin: 0 0 6px 10px; padding-left: 6px; border-left: 1px solid var(--line); font-size: 13px; }
+.rail .sub-links a { padding: 3px 8px; }
+.rail details.top > summary { display: block; font-size: 11px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); margin: 14px 8px 6px; }
+.rail details.top > summary:hover { color: var(--ink); }
+.rail details.top > summary::before { content: none; }
+.rail details.top > summary::after {
+  content: ""; display: inline-block; margin-left: 7px; vertical-align: 1px; border: 4px solid transparent; border-left: 5px solid currentColor; border-right: 0; transition: rotate .12s;
+}
+.rail details.top[open] > summary::after { rotate: 90deg; }
+.dir .card {
+  display: flex; flex-direction: column; gap: 2px; padding: 12px 14px; border-radius: 8px;
+  background: var(--panel); border: 1px solid var(--line); border-left: 5px solid var(--accent); align-self: start;
+}
+.dir .card > a, .dir summary > a { text-decoration: none; }
+.dir .card > a:hover b, .dir summary > a:hover b { text-decoration: underline; }
+.dir summary { display: grid; grid-template-columns: 1fr auto; column-gap: 8px; align-items: center; }
+.dir summary > span:not(.caret) { grid-column: 1; }
+.dir summary .caret { grid-column: 2; grid-row: 1 / span 2; }
+.dir .card ul { list-style: none; margin: 10px 0 0; padding: 8px 0 0; border-top: 1px solid var(--line); font-size: 13px; max-height: 320px; overflow-y: auto; }
+.dir .card li { display: flex; justify-content: space-between; gap: 8px; padding: 2px 0; }
+.dir .card li a { text-decoration: none; } .dir .card li a:hover { text-decoration: underline; color: var(--accent); }
+.dir .card li small { color: var(--muted); font-variant-numeric: tabular-nums; }
+details.group { border-top: 1px solid var(--line); }
+details.group > summary { display: flex; align-items: center; gap: 10px; padding: 12px 0; }
+details.group > summary .more { margin-left: auto; font-size: 13px; font-weight: 600; color: var(--accent); text-decoration: none; white-space: nowrap; }
+details.group > summary .count { color: var(--muted); font-size: 13px; white-space: nowrap; }
+details.group > .group-body { padding: 4px 0 8px; }
+h2.label a { color: inherit; text-decoration: none; } h2.label a:hover { color: var(--accent); }
+/* divides the website-only label lists from the store's own displays and shelves */
+.split { display: flex; align-items: center; gap: 10px; margin: 28px 0 4px; font-size: 11px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+.split::before, .split::after { content: ""; flex: 1; border-top: 2px solid var(--line); }
+.split::before { flex: 0 0 16px; }
+.rail .split { margin: 18px 8px 0; font-size: 10px; }
+.more-labels { margin: -12px 0 20px; font-size: 13px; font-weight: 600; }
+.more-labels a { color: var(--accent); text-decoration: none; }
+.scope { margin: -2px 0 6px; font-size: 14px; color: var(--muted); }
+.scope a { margin-left: 8px; color: var(--accent); font-weight: 600; text-decoration: none; }
+.rail-empty { color: var(--muted); padding: 4px 8px; }
+.linkbtn { border: 0; background: none; color: var(--accent); font-weight: 600; font-size: 13px; cursor: pointer; padding: 4px 0; }
+
+footer { border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; padding: 18px 16px 30px; max-width: 1500px; margin: 0 auto; }
+footer p { margin: 4px 0; }
+.loading { padding: 80px 0; text-align: center; color: var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <div class="bar">
+    <a class="brand" href="#/"><span>Movie <b>Madness</b></span><small>Lite</small></a>
+    <div class="search">
+      <input id="q" type="search" placeholder="Search titles, directors, actors, shelves…" autocomplete="off" spellcheck="false" aria-label="Search the catalog">
+      <kbd>/</kbd>
+    </div>
+    <div class="filters">
+      <div class="seg" id="fmt" role="group" aria-label="Format">
+        <button data-v="" aria-pressed="true">All</button>
+        <button data-v="k" aria-pressed="false">4K</button>
+        <button data-v="b" aria-pressed="false">Blu-ray</button>
+        <button data-v="d" aria-pressed="false">DVD</button>
+        <button data-v="v" aria-pressed="false">VHS</button>
+      </div>
+      <div class="seg dev-only" id="kind" role="group" aria-label="Type">
+        <button data-v="" aria-pressed="true">All</button>
+        <button data-v="0" aria-pressed="false">Films</button>
+        <button data-v="1" aria-pressed="false">TV</button>
+      </div>
+      <div class="seg dev-only" id="match" role="group" aria-label="TMDB match" title="Whether a rental was matched to a TMDB title">
+        <button data-v="" aria-pressed="true">All</button>
+        <button data-v="m" aria-pressed="false">Matched</button>
+        <button data-v="u" aria-pressed="false">Unmatched</button>
+      </div>
+      <a class="dev-only dev-badge" href="?dev=0" title="Leave dev view">Dev view ✕</a>
+    </div>
+  </div>
+</header>
+<div class="wrap">
+  <nav class="rail" id="rail" aria-label="Sections"></nav>
+  <main id="main"><div class="loading">Loading the catalog…</div></main>
+</div>
+<footer>
+  <p id="stamp"></p>
+  <p>An unaffiliated fan project, not endorsed by or connected with <a href="https://www.moviemadness.org/">Movie Madness</a>. Catalog listings are the property of Movie Madness; being listed doesn't mean a copy is on the shelf today. Data from <a href="https://github.com/tjsander/movie-madness-pdx-tmdb">movie-madness-pdx-tmdb</a>.</p>
+  <p>This product uses the <a href="https://www.themoviedb.org/">TMDB</a> API but is not endorsed or certified by TMDB.</p>
+  <p>Searching for an actor or director finds only the titles on their named shelves (like "KUROSAWA, AKIRA"), not every film they're in. To see which of their films Movie Madness has, browse them on <a href="https://letterboxd.com/">Letterboxd</a> with the <a href="https://github.com/tjsander/mmboxmonkey">mmboxmonkey</a> script, which adds Movie Madness availability to Letterboxd film pages.</p>
+  <p>Made by <a href="https://github.com/tjsander">Travis J. Sanders</a>.</p>
+</footer>
+<dialog id="dlg" aria-label="Title details"></dialog>
+
+<script>
+"use strict";
+const IMG = "https://image.tmdb.org/t/p/";
+const FMT_SHORT = { "4K UHD": "4K", "Blu-Ray 3D": "3D", "Blu-Ray": "BD", "DVD": "DVD", "DVD-R": "DVD-R", "VHS": "VHS", "Book": "Book", "": "?" };
+const FMT_GROUP = { "4K UHD": "k", "Blu-Ray 3D": "b", "Blu-Ray": "b", "DVD": "d", "DVD-R": "d", "VHS": "v" };
+const ROW_MAX = 24, PAGE = 120, SEARCH_MAX = 300;
+// works[].k: 0 film, 1 TV, 2 unmatched (no TMDB id; its id is a store rental id)
+const KIND_DIR = ["movie", "tv", "unmatched"];
+const workCode = w => "mtu"[w.k] + w.id;
+
+const $ = (s, el = document) => el.querySelector(s);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const fold = s => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/&/g, " and ").replace(/['’]/g, "").replace(/[^a-z0-9]+/g, " ").trim();
+const noArticle = s => s.replace(/^(the|a|an) /, "");
+const collator = new Intl.Collator("en", { numeric: true, sensitivity: "base" });
+
+let C;               // catalog
+let works = [];      // [{k,id,t,y,p,pop,r,o,sk,hay,ft}]
+let shelves = [];    // [{section,group,name,path,label,works:[i]}]
+let sections = new Map(); // name -> {name, groups:[{name,section,label,shelves:[si],n}], n}
+let areas = new Map();    // name -> {name, sections:[sec], multi}
+let displays = [];   // [{name, works:[i]}]
+let collections = [];     // website-only categories: [{group, name, works:[i], byWork: Map(i -> Set(rental j))}]
+const rentalColl = new Map();  // "work:rental" -> its collection
+const BOUTIQUE = "Boutique Blu-rays";
+let byKey = new Map();
+const state = { fmt: "", kind: "", match: "" };  // match: "" all, "m" matched to TMDB, "u" unmatched
+let io;              // shared IntersectionObserver for lazy shelf rows
+let postersReq = null, postersLoaded = false;  // most poster paths arrive separately, in posters.json
+
+/* ------------------------------------------------------------------ data */
+
+async function load() {
+  postersReq = fetch("data/posters.json").then(r => r.json());  // in parallel with the catalog
+  const res = await fetch("data/catalog.json");
+  C = await res.json();
+  const fmtGroup = C.formats.map(f => FMT_GROUP[f] || "");
+  // [super-section, shelf, name shelf]: "Foreign" › "Japanese" › "KUROSAWA, AKIRA"
+  shelves = C.shelves.map(([section, group, name]) => ({
+    section, group, name, works: [],
+    path: [section, group, name].filter(Boolean).join(" > "),
+    label: name || group || section,
+  }));
+  displays = C.displays.map(name => ({ name, works: [] }));
+  works = C.works.map((w, i) => {
+    const [k, id, t, y, p, pop, r, o] = w;
+    const ft = fold(t);
+    const o2 = o ? fold(o) : "";
+    const seenS = new Set(), seenD = new Set();
+    for (const [f, s, d] of r) {
+      if (s >= 0 && !seenS.has(s)) { seenS.add(s); shelves[s].works.push(i); }
+      if (d >= 0 && !seenD.has(d)) { seenD.add(d); displays[d].works.push(i); }
+    }
+    const obj = {
+      idx: i,
+      k, id, t, y, p, pop, r, o, ft, fta: noArticle(ft),
+      sk: noArticle(ft),
+      hay: " " + ft + " " + (o2 && o2 !== ft ? o2 + " " : "") + (y || "") + " ",
+      groups: r.map(x => fmtGroup[x[0]]),
+    };
+    byKey.set(workCode(obj), obj);
+    return obj;
+  });
+  // super-section -> shelf groups -> shelves; the section's own main shelf group comes first
+  const byName = (a, b) => a.name === b.name ? 0 : a.name === "" ? -1 : b.name === "" ? 1 : collator.compare(a.name, b.name);
+  for (const [si, s] of shelves.entries()) {
+    s.works.sort((a, b) => collator.compare(works[a].sk, works[b].sk) || works[a].y - works[b].y);
+    if (!sections.has(s.section)) sections.set(s.section, { name: s.section, groups: new Map(), n: 0 });
+    const sec = sections.get(s.section);
+    if (!sec.groups.has(s.group)) sec.groups.set(s.group, { name: s.group, section: s.section, label: s.group || s.section, shelves: [], n: 0 });
+    const g = sec.groups.get(s.group);
+    g.shelves.push(si);
+    g.n += s.works.length;
+    sec.n += s.works.length;
+  }
+  for (const sec of sections.values()) {
+    sec.groups = [...sec.groups.values()].sort(byName);
+    for (const g of sec.groups) g.shelves.sort((a, b) => byName({ name: shelves[a].name }, { name: shelves[b].name }));
+  }
+  for (const s of shelves) { s.fold = " " + fold([s.section, s.group, s.name].join(" ")); s.nameFold = s.name ? " " + fold(s.name) : ""; }
+  // store areas holding several sections ("TV" › "British TV"); a section on its own is its own area
+  for (const sec of sections.values()) {
+    sec.area = (C.areas || {})[sec.name] || sec.name;
+    if (!areas.has(sec.area)) areas.set(sec.area, { name: sec.area, sections: [] });
+    areas.get(sec.area).sections.push(sec);
+  }
+  for (const a of areas.values()) {
+    a.sections.sort((x, y) => (y.name === a.name) - (x.name === a.name) || collator.compare(x.name, y.name));
+    a.multi = a.sections.length > 1 || a.sections[0].name !== a.name;
+  }
+  for (const d of displays) d.works.sort((a, b) => collator.compare(works[a].sk, works[b].sk));
+  displays.sort((a, b) => b.works.length - a.works.length);
+  collections = (C.collections || []).map(c => {
+    const byWork = new Map();
+    for (let k = 0; k < c.items.length; k += 2) {
+      const [i, j] = [c.items[k], c.items[k + 1]];
+      if (!byWork.has(i)) byWork.set(i, new Set());
+      byWork.get(i).add(j);
+      rentalColl.set(i + ":" + j, c);
+    }
+    const list = [...byWork.keys()].sort((a, b) => collator.compare(works[a].sk, works[b].sk));
+    return { group: c.group, name: c.name, works: list, byWork };
+  });
+  const upd = new Date(C.updated);
+  $("#stamp").textContent = `${works.length.toLocaleString()} titles on ${shelves.length.toLocaleString()} shelves · catalog updated ${upd.toLocaleDateString(undefined, { dateStyle: "medium" })}`;
+}
+
+/* A work passes the filters if one of its rentals does (on `where`, when given). */
+/* Is rental j of w on the shelf, display or collection `where`? */
+function inWhere(where, w, j) {
+  if (!where) return true;
+  if (where.shelf !== undefined) return w.r[j][1] === where.shelf;
+  if (where.coll) { const js = where.coll.byWork.get(w.idx); return !!js && js.has(j); }
+  return w.r[j][2] === where.display;
+}
+function passes(w, where) {
+  if (!kindOk(w)) return false;
+  for (let j = 0; j < w.r.length; j++) {
+    if (!inWhere(where, w, j)) continue;
+    if (!state.fmt || w.groups[j] === state.fmt) return true;
+  }
+  return false;
+}
+/* Films/TV narrows the matched titles; unmatched ones have no known type, so only the match filter applies. */
+const kindOk = w => (w.k === 2 ? state.match !== "m" : state.match !== "u" && (state.kind === "" || String(w.k) === state.kind));
+const visible = (list, where) => (state.fmt || state.kind !== "" || state.match || searchMask
+  ? list.filter(i => (!searchMask || searchMask[i]) && passes(works[i], where)) : list);
+
+/* While searching, the rail counts only titles matching the text (searchMask), and its links
+   narrow the search to a section instead of leaving it. */
+let searchMask = null, searchKey = "", railQ = null;
+const hrefSearch = (q, scope) => "#/search/" + enc(q) + (scope ? "/" + scope.kind + "/" + enc(scope.name) : "");
+function parseSearch(r) {
+  const [, , q = "", kind, name] = r.split("/");
+  return { q: dec(q), scope: kind && name ? { kind, name: dec(name) } : null };
+}
+const HREF = { boutique: () => "#/boutique", label: n => hrefLabel(n), display: n => hrefDisplay(n), area: n => hrefArea(n), section: n => hrefSection(n), group: n => "#/group/" + enc(n), shelf: n => "#/shelf/" + enc(n) };
+const hrefFor = (kind, name) => (railQ !== null ? hrefSearch(railQ, { kind, name }) : HREF[kind](name));
+
+/* Does rental [format, shelf, display] sit inside a search scope? */
+function scopeTest(scope) {
+  if (!scope) return null;
+  const { kind, name } = scope;
+  if (kind === "display") { const di = C.displays.indexOf(name); return (w, j) => w.r[j][2] === di; }
+  if (kind === "label") { const coll = collections.find(c => c.name === name); return (w, j) => !!coll && inWhere({ coll }, w, j); }
+  const inShelf = shelves.map(s =>
+    kind === "area" ? sections.get(s.section).area === name :
+    kind === "section" ? s.section === name :
+    kind === "group" ? s.section + " > " + s.group === name : s.path === name);
+  const test = (w, j) => !!inShelf[w.r[j][1]];
+  test.shelf = si => inShelf[si];  // narrows the matching-shelf chips too
+  return test;
+}
+function scopeLabel({ kind, name }) {
+  return name.replace(/ > $/, "").replace(/ > /g, " › ") + (kind === "group" && name.endsWith(" > ") ? " › Main shelf" : "");
+}
+
+/* ------------------------------------------------------------------ routing */
+
+const enc = s => encodeURIComponent(s).replace(/%20/g, "+");
+const dec = s => decodeURIComponent(s.replace(/\+/g, "%20"));
+const hrefSection = n => "#/section/" + enc(n);
+const hrefShelf = si => "#/shelf/" + enc(shelves[si].path);
+const hrefDisplay = n => "#/display/" + enc(n);
+const hrefArea = n => "#/area/" + enc(n);
+const hrefLabel = n => "#/label/" + enc(n);
+/* Breadcrumbs down to a section: its area first when it sits inside one. */
+const sectionCrumbs = name => {
+  const a = sections.get(name).area;
+  return [...(a !== name ? [[hrefArea(a), a]] : []), [hrefSection(name), name]];
+};
+const hrefGroup = g => "#/group/" + enc(g.section + " > " + g.name);
+const groupOf = si => sections.get(shelves[si].section).groups.find(g => g.name === shelves[si].group);
+let route = "/";
+
+function parseHash() {
+  const h = location.hash.slice(1) || "/";
+  const [r, m] = h.split("!");
+  return { route: r || "/", modal: m || null };
+}
+
+function go(r, replace) {
+  const h = "#" + r;
+  if (replace) history.replaceState(null, "", h); else history.pushState(null, "", h);
+  render();
+}
+
+function render() {
+  const { route: r, modal } = parseHash();
+  if (r !== route || !$("#main").dataset.ready) {
+    route = r;
+    renderRoute();
+  }
+  if (modal) openModal(modal); else if ($("#dlg").open) $("#dlg").close();
+}
+
+function renderRoute() {
+  const main = $("#main");
+  main.dataset.ready = "1";
+  if (io) io.disconnect();
+  io = new IntersectionObserver(onVisible, { rootMargin: "800px 0px" });
+  const [, kind, ...rest] = route.split("/");
+  const arg = rest.length ? dec(rest.join("/")) : "";
+  if (kind === "search") {
+    const { q, scope } = parseSearch(route);
+    if ($("#q").value !== q && document.activeElement !== $("#q")) $("#q").value = q;
+    railQ = q;
+    viewSearch(q, scope);
+  }
+  else {
+    searchMask = null; searchKey = ""; railQ = null;
+    if (document.activeElement !== $("#q")) $("#q").value = "";
+    if (kind === "section" && sections.has(arg)) viewSection(sections.get(arg));
+    else if (kind === "boutique") viewBoutique();
+    else if (kind === "label") { const c = collections.find(c => c.name === arg); c ? viewLabel(c) : viewBoutique(); }
+    else if (kind === "area" && areas.has(arg)) areas.get(arg).multi ? viewArea(areas.get(arg)) : viewSection(sections.get(arg));
+    else if (kind === "group") {
+      const [secName, ...gn] = arg.split(" > "), sec = sections.get(secName);
+      const g = sec && sec.groups.find(g => g.name === gn.join(" > "));
+      g ? viewGroup(g) : viewHome();
+    }
+    else if (kind === "shelf") { const si = shelves.findIndex(s => s.path === arg); si >= 0 ? viewShelf(si) : viewHome(); }
+    else if (kind === "display") { const d = displays.find(d => d.name === arg); d ? viewDisplay(d) : viewHome(); }
+    else viewHome();
+  }
+  if (railKey !== currentTallyKey()) renderRail();
+  markRail();
+  if (kind !== "search") window.scrollTo(0, 0);
+}
+
+/* ------------------------------------------------------------------ rendering */
+
+/* Matched titles without a path yet are waiting on posters.json: show an empty placeholder, not the title. */
+const posterPending = w => !w.p && !postersLoaded && w.k !== 2;
+function posterHTML(w, kind) {
+  if (w.p) return kind === "tile"
+    ? `<img loading="lazy" decoding="async" alt="" src="${IMG}w154/${w.p}.jpg" srcset="${IMG}w154/${w.p}.jpg 1x, ${IMG}w342/${w.p}.jpg 2x">`
+    : `<img alt="" src="${IMG}w342/${w.p}.jpg">`;
+  return posterPending(w) ? `<div class="noimg"></div>` : `<div class="noimg">${esc(w.t)}</div>`;
+}
+
+/* Merge posters.json into the catalog, then fill in any placeholders already on screen. */
+async function loadPosters() {
+  try {
+    let P = await postersReq;
+    // a cached posters.json from an older build would be misaligned; fetch the one for this catalog
+    if (P.built !== C.built) P = await fetch("data/posters.json?v=" + encodeURIComponent(C.built)).then(r => r.json());
+    if (P.built === C.built) P.posters.forEach((p, i) => { if (p && !works[i].p) works[i].p = p; });
+  } catch (e) { console.warn("posters.json:", e); }
+  postersLoaded = true;
+  for (const a of document.querySelectorAll("a.tile.pending")) {
+    a.classList.remove("pending");
+    a.querySelector(".noimg").outerHTML = posterHTML(byKey.get(a.dataset.k), "tile");
+  }
+  const dlg = $("#dlg"), pending = dlg.open && dlg.querySelector(".modal > .poster.pending");
+  if (pending) { pending.classList.remove("pending"); pending.innerHTML = posterHTML(byKey.get(dlg.dataset.k), "modal"); }
+}
+
+function tile(i, where) {
+  const w = works[i];
+  const fm = [], seen = new Set();
+  let disp = null;
+  for (let j = 0; j < w.r.length; j++) {
+    const [f, s, d] = w.r[j];
+    if (where && where.display === undefined && !inWhere(where, w, j)) continue;
+    const short = FMT_SHORT[C.formats[f]];
+    if (!seen.has(short)) { seen.add(short); fm.push(short); }
+    if (d >= 0 && !disp) disp = C.displays[d];
+  }
+  const cls = { "4K": "k", "VHS": "v" };
+  const img = posterHTML(w, "tile");
+  const badge = disp && !(where && where.display !== undefined) ? `<span class="badge">${esc(disp.replace(/ \(.*\)$/, "").replace(/^(DVD|Blu-Ray) /, ""))}</span>` : "";
+  return `<a class="tile${posterPending(w) ? " pending" : ""}" data-k="${workCode(w)}" href="#${route}!${workCode(w)}">
+    <div class="poster">${img}${badge}<div class="fmts">${fm.map(f => `<i class="${cls[f] || ""}">${f}</i>`).join("")}</div></div>
+    <div class="t">${esc(w.t)}</div><div class="y">${w.y || ""}${w.k === 1 ? " · TV" : ""}</div></a>`;
+}
+
+const plural = (n, s) => `${n.toLocaleString()} ${s}${n === 1 ? "" : "s"}`;
+
+function shelfRow(title, href, list, where, cls = "") {
+  return `<section class="shelf ${cls}">
+    <div class="shelf-head"><a class="tag" href="${href}">${esc(title)}</a><span class="count">${plural(list.length, "title")}</span>
+    ${list.length > ROW_MAX ? `<a class="more" href="${href}">See all →</a>` : ""}</div>
+    <div class="row placeholder" data-lazy></div></section>`;
+}
+
+/* Rows are rendered when they scroll near the viewport. */
+const pending = new WeakMap();
+function lazyRows(container, specs) {
+  container.querySelectorAll("[data-lazy]").forEach((el, n) => { pending.set(el, specs[n]); io.observe(el); });
+}
+function onVisible(entries) {
+  for (const e of entries) {
+    if (!e.isIntersecting) continue;
+    const el = e.target, spec = pending.get(el);
+    io.unobserve(el);
+    if (spec) { el.innerHTML = spec.list.slice(0, ROW_MAX).map(i => tile(i, spec.where)).join(""); el.classList.remove("placeholder"); }
+    else if (el._more) el._more();
+  }
+}
+
+/* A grid that renders PAGE tiles at a time as you scroll. */
+function pagedGrid(container, list, where) {
+  const grid = document.createElement("div");
+  grid.className = "grid";
+  const sent = document.createElement("div");
+  sent.className = "sentinel";
+  container.append(grid, sent);
+  let n = 0;
+  sent._more = () => {
+    grid.insertAdjacentHTML("beforeend", list.slice(n, n + PAGE).map(i => tile(i, where)).join(""));
+    n += PAGE;
+    if (n < list.length) { io.unobserve(sent); io.observe(sent); }
+  };
+  sent._more();
+  if (!list.length) grid.outerHTML = `<div class="empty">Nothing here matches the current filters.</div>`;
+}
+
+function sortList(list, mode) {
+  if (mode === "year") return [...list].sort((a, b) => (works[a].y || 9999) - (works[b].y || 9999) || collator.compare(works[a].sk, works[b].sk));
+  if (mode === "pop") return [...list].sort((a, b) => works[b].pop - works[a].pop);
+  return list;
+}
+function sortControl(current) {
+  const opts = [["", "A–Z"], ["year", "Year"], ["pop", "Popular"]];
+  return `<div class="seg" id="sort" role="group" aria-label="Sort">${opts.map(([v, l]) => `<button data-v="${v}" aria-pressed="${v === current}">${l}</button>`).join("")}</div>`;
+}
+let sortMode = "";
+
+const shelvesWord = n => plural(n, "shelf").replace("shelfs", "shelves");
+const crumbs = (...links) => `<div class="crumbs"><a href="#/">Shelves</a>${links.map(([h, t]) => ` › ${h ? `<a href="${h}">${esc(t)}</a>` : esc(t)}`).join("")}</div>`;
+
+/* Shelf groups and their shelves with what's visible under the current filters. */
+function groupRows(g) {
+  return g.shelves.map(si => ({ si, list: visible(shelves[si].works, { shelf: si }) })).filter(x => x.list.length);
+}
+function sectionGroups(sec) {
+  return sec.groups.map(g => { const rows = groupRows(g); return { g, rows, n: rows.reduce((n, x) => n + x.list.length, 0) }; }).filter(x => x.rows.length);
+}
+
+function viewHome() {
+  const main = $("#main");
+  const specs = [];
+  let html = `<h1>The shelves</h1><p class="sub">${plural(works.filter(kindOk).length, "unique title")} you can rent at Movie Madness. No-frills lightning-fast search.</p>`;
+  const { colls } = tally();
+  if (colls.length) {
+    html += `<h2 class="label"><a href="#/boutique">${BOUTIQUE}</a></h2>${labelChips(colls)}`;
+    for (const { c, list } of colls.slice(0, 4)) { html += shelfRow(c.name, hrefLabel(c.name), list, null); specs.push({ list, where: { coll: c } }); }
+    if (colls.length > 4) html += `<p class="more-labels"><a href="#/boutique">All ${colls.length} labels →</a></p>`;
+    html += `<div class="split">In the store</div>`;
+  }
+  const front = displays.map(d => ({ d, list: visible(d.works, { display: C.displays.indexOf(d.name) }) })).filter(x => x.list.length);
+  if (front.length) html += `<h2 class="label">Up front</h2>`;
+  for (const { d, list } of front) {
+    html += shelfRow(d.name, hrefDisplay(d.name), list, null);
+    specs.push({ list, where: { display: C.displays.indexOf(d.name) } });
+  }
+  html += `<h2 class="label">Sections</h2><div class="dir">${tally().areas.map(areaCard).join("")}</div>`;
+  main.innerHTML = html;
+  lazyRows(main, specs);
+}
+
+/* Sections, shelf groups and displays with counts under the current filters, empty ones dropped.
+   Recomputed only when a filter changes. */
+let tallyKey = null, tallyCache = null;
+const currentTallyKey = () => state.fmt + "|" + state.kind + "|" + state.match + "|" + (searchMask ? searchKey : "");
+function tally() {
+  const key = currentTallyKey();
+  if (key === tallyKey) return tallyCache;
+  const bySec = new Map();
+  for (const sec of sections.values()) {
+    const groups = sectionGroups(sec);
+    const n = groups.reduce((n, x) => n + x.n, 0);
+    if (!n) continue;
+    const named = groups.some(x => x.g.name);
+    bySec.set(sec.name, { sec, groups, n, named, shelfCount: named ? groups.length : groups[0].rows.length });
+  }
+  const list = [];
+  for (const a of areaList()) {
+    const members = a.sections.map(sec => bySec.get(sec.name)).filter(Boolean);
+    if (members.length) list.push({ a, members, n: members.reduce((n, m) => n + m.n, 0) });
+  }
+  const disp = displays.map(d => ({ d, n: visible(d.works, { display: C.displays.indexOf(d.name) }).length })).filter(x => x.n);
+  const colls = collections.map(c => ({ c, list: visible(c.works, { coll: c }) })).filter(x => x.list.length);
+  tallyKey = key;
+  return (tallyCache = { areas: list, bySec, disp, colls });
+}
+
+function areaCard({ a, members, n }) {
+  if (!a.multi) return sectionCard(members[0]);
+  const head = `<a href="${hrefArea(a.name)}"><b>${esc(a.name)}</b></a><span>${plural(n, "title")} · ${plural(members.length, "section")}</span>`;
+  return `<details class="card"><summary>${head}<span class="caret" aria-hidden="true"></span></summary>
+    <ul>${members.map(m => `<li><a href="${hrefSection(m.sec.name)}">${esc(m.sec.name)}</a><small>${m.n.toLocaleString()}</small></li>`).join("")}</ul></details>`;
+}
+
+function sectionCard({ sec, groups, n, named, shelfCount }) {
+  const head = `<a href="${hrefSection(sec.name)}"><b>${esc(sec.name)}</b></a><span>${plural(n, "title")} · ${shelvesWord(shelfCount)}</span>`;
+  if (!named) return `<div class="card">${head}</div>`;
+  return `<details class="card"><summary>${head}<span class="caret" aria-hidden="true"></span></summary>
+    <ul>${groups.map(({ g, n }) => `<li><a href="${hrefGroup(g)}">${esc(g.name || "Main shelf")}</a><small>${n.toLocaleString()}</small></li>`).join("")}</ul></details>`;
+}
+
+function areaList() {
+  return [...areas.values()].sort((a, b) => (a.name === "Shelf unknown") - (b.name === "Shelf unknown") || collator.compare(a.name, b.name));
+}
+
+/* One shelf group's shelves as rows, with jump chips when there are many. */
+function groupBody(rows) {
+  let html = "";
+  if (rows.length > 8) html += `<div class="chips">${rows.map(({ si, list }) => `<a href="${hrefShelf(si)}">${esc(shelves[si].label)}<small>${list.length}</small></a>`).join("")}</div>`;
+  for (const { si, list } of rows) html += shelfRow(shelves[si].label, hrefShelf(si), list, { shelf: si });
+  return html;
+}
+
+const labelChips = colls => `<div class="chips">${colls.map(({ c, list }) => `<a href="${hrefLabel(c.name)}">${esc(c.name)}<small>${list.length}</small></a>`).join("")}</div>`;
+const BOUTIQUE_NOTE = "Picked out for this site, not a shelf in the store: Blu-ray and 4K copies whose store listing names a boutique label.";
+
+function viewBoutique() {
+  const main = $("#main");
+  const { colls } = tally();
+  const n = new Set(colls.flatMap(x => x.list)).size;
+  main.innerHTML = `${crumbs()}<h1>${BOUTIQUE}</h1><p class="sub">${plural(n, "title")} from ${plural(colls.length, "label")}. ${BOUTIQUE_NOTE}</p>
+    ${labelChips(colls)}${colls.map(({ c, list }) => shelfRow(c.name, hrefLabel(c.name), list, null)).join("")}
+    ${colls.length ? "" : `<div class="empty">No boutique releases match the current filters.</div>`}`;
+  lazyRows(main, colls.map(({ c, list }) => ({ list, where: { coll: c } })));
+}
+
+function viewLabel(c) {
+  const main = $("#main");
+  const list = sortList(visible(c.works, { coll: c }), sortMode);
+  main.innerHTML = `${crumbs(["#/boutique", BOUTIQUE])}<h1>${esc(c.name)}</h1>
+    <div class="toolbar"><p class="sub" style="margin:0">${plural(list.length, "title")}${c.name === "Other boutique labels" ? " from smaller labels" : ""}</p>${sortControl(sortMode)}</div>`;
+  pagedGrid(main, list, { coll: c });
+}
+
+function viewArea(a) {
+  const main = $("#main");
+  const members = tally().areas.find(x => x.a === a)?.members || [];
+  const total = members.reduce((n, m) => n + m.n, 0);
+  const open = members.length <= 2;
+  let html = `${crumbs()}<h1>${esc(a.name)}</h1>
+    <div class="toolbar"><p class="sub" style="margin:0">${plural(total, "title")} in ${plural(members.length, "section")}</p>
+    ${members.length > 1 ? `<button class="linkbtn" id="toggle-all">${open ? "Collapse all" : "Expand all"}</button>` : ""}</div>`;
+  const specs = [];
+  for (const m of members) {
+    const rows = m.groups.flatMap(x => x.rows);
+    html += `<details class="group"${open ? " open" : ""}><summary><span class="caret" aria-hidden="true"></span><span class="tag">${esc(m.sec.name)}</span>
+      <span class="count">${plural(m.n, "title")} · ${shelvesWord(m.shelfCount)}</span>
+      <a class="more" href="${hrefSection(m.sec.name)}">Open →</a></summary><div class="group-body">${groupBody(rows)}</div></details>`;
+    specs.push(...rows.map(({ si, list }) => ({ list, where: { shelf: si } })));
+  }
+  if (!members.length) html += `<div class="empty">Nothing here matches the current filters.</div>`;
+  main.innerHTML = html;
+  lazyRows(main, specs);
+  wireToggleAll(main);
+}
+
+function wireToggleAll(main) {
+  const btn = $("#toggle-all");
+  if (btn) btn.onclick = () => {
+    const opening = btn.textContent.startsWith("Expand");
+    main.querySelectorAll("details.group").forEach(d => (d.open = opening));
+    btn.textContent = opening ? "Collapse all" : "Expand all";
+  };
+}
+
+function viewSection(sec) {
+  const main = $("#main");
+  const groups = sectionGroups(sec);
+  const total = groups.reduce((n, x) => n + x.n, 0);
+  let html = `${crumbs(...sectionCrumbs(sec.name).slice(0, -1))}<h1>${esc(sec.name)}</h1>`;
+  if (groups.length === 1) {
+    const { g, rows } = groups[0];
+    html += `<p class="sub">${plural(total, "title")} on ${shelvesWord(rows.length)}${g.name ? ` · all on ${esc(g.name)}` : ""}</p>` + groupBody(rows);
+    main.innerHTML = html;
+    lazyRows(main, rows.map(({ si, list }) => ({ list, where: { shelf: si } })));
+    return;
+  }
+  const open = groups.length <= 3;
+  html += `<div class="toolbar"><p class="sub" style="margin:0">${plural(total, "title")} on ${shelvesWord(groups.length)}</p>
+    <button class="linkbtn" id="toggle-all">${open ? "Collapse all" : "Expand all"}</button></div>`;
+  for (const { g, rows, n } of groups) {
+    html += `<details class="group"${open ? " open" : ""}><summary><span class="caret" aria-hidden="true"></span><span class="tag">${esc(g.name || "Main shelf")}</span>
+      <span class="count">${plural(n, "title")}${rows.length > 1 ? ` · ${shelvesWord(rows.length)}` : ""}</span>
+      <a class="more" href="${hrefGroup(g)}">Open →</a></summary><div class="group-body">${groupBody(rows)}</div></details>`;
+  }
+  if (!groups.length) html += `<div class="empty">Nothing in this section matches the current filters.</div>`;
+  main.innerHTML = html;
+  lazyRows(main, groups.flatMap(({ rows }) => rows.map(({ si, list }) => ({ list, where: { shelf: si } }))));
+  wireToggleAll(main);
+}
+
+function viewGroup(g) {
+  const main = $("#main");
+  const rows = groupRows(g);
+  const total = rows.reduce((n, x) => n + x.list.length, 0);
+  main.innerHTML = `${crumbs(...sectionCrumbs(g.section))}<h1>${esc(g.name || g.section)}</h1>
+    <p class="sub">${plural(total, "title")}${rows.length > 1 ? ` on ${shelvesWord(rows.length)}` : ""}</p>${groupBody(rows)}
+    ${rows.length ? "" : `<div class="empty">Nothing on this shelf matches the current filters.</div>`}`;
+  lazyRows(main, rows.map(({ si, list }) => ({ list, where: { shelf: si } })));
+}
+
+function viewShelf(si) {
+  const s = shelves[si];
+  const list = sortList(visible(s.works, { shelf: si }), sortMode);
+  const main = $("#main");
+  const g = groupOf(si);
+  main.innerHTML = `${crumbs(...sectionCrumbs(s.section), ...(s.name && s.group ? [[hrefGroup(g), s.group]] : []))}
+    <h1>${esc(s.label)}</h1>
+    <div class="toolbar"><p class="sub" style="margin:0">${plural(list.length, "title")}</p>${sortControl(sortMode)}</div>`;
+  pagedGrid(main, list, { shelf: si });
+}
+
+function viewDisplay(d) {
+  const di = C.displays.indexOf(d.name);
+  const list = sortList(visible(d.works, { display: di }), sortMode);
+  const main = $("#main");
+  main.innerHTML = `${crumbs([null, "Up front"])}<h1>${esc(d.name)}</h1>
+    <div class="toolbar"><p class="sub" style="margin:0">${plural(list.length, "title")} on display now</p>${sortControl(sortMode)}</div>`;
+  pagedGrid(main, list, { display: di });
+}
+
+function search(q, scope) {
+  const fq = fold(q);
+  const mask = new Uint8Array(works.length);
+  if (!fq) return { list: [], shelfHits: [], total: 0, mask };
+  const toks = fq.split(" ");
+  const fqa = noArticle(fq);
+  const inScope = scopeTest(scope);
+  // Name shelves the search names ("mel gib" -> GIBSON, MEL): their titles match too. At least one
+  // word must hit the name itself, so "foreign" doesn't pull in every Foreign name shelf.
+  const onShelf = new Uint8Array(works.length);
+  for (const sh of shelves) {
+    if (!sh.nameFold || !toks.some(t => sh.nameFold.includes(" " + t)) || !toks.every(t => sh.fold.includes(" " + t))) continue;
+    for (const i of sh.works) onShelf[i] = 1;
+  }
+  const scored = [];
+  for (let i = 0; i < works.length; i++) {
+    const w = works[i];
+    let ok = true;
+    for (const t of toks) if (!w.hay.includes(t)) { ok = false; break; }
+    if (!ok && !onShelf[i]) continue;
+    mask[i] = 1;
+    if (!kindOk(w)) continue;
+    let hit = false;
+    for (let j = 0; j < w.r.length && !hit; j++) hit = (!inScope || inScope(w, j)) && (!state.fmt || w.groups[j] === state.fmt);
+    if (!hit) continue;
+    let s = Math.log1p(w.pop) * 12 + Math.min(w.r.length, 4) * 2;
+    if (w.ft === fq || w.fta === fqa) s += 1000;
+    else if (w.fta.startsWith(fqa) || w.ft.startsWith(fq)) s += 400;
+    else if (w.hay.includes(" " + fq)) s += 150;
+    if (onShelf[i]) s += 300;
+    scored.push([s, i]);
+  }
+  scored.sort((a, b) => b[0] - a[0]);
+  // shelves whose name matches every token: directors, actors, countries…
+  const shelfHits = [];
+  for (const [si, s] of shelves.entries()) {
+    if (inScope && inScope.shelf && !inScope.shelf(si)) continue;
+    if (toks.every(t => s.fold.includes(" " + t))) {
+      const n = visible(s.works, { shelf: si }).length;
+      if (n) shelfHits.push([si, n]);
+    }
+  }
+  shelfHits.sort((a, b) => b[1] - a[1]);
+  return { list: scored.slice(0, SEARCH_MAX).map(x => x[1]), shelfHits, total: scored.length, mask };
+}
+
+function viewSearch(q, scope) {
+  searchMask = null;
+  const { list, shelfHits, total, mask } = search(q, scope);
+  const main = $("#main");
+  let html = `<h1>“${esc(q)}”</h1>${scope ? `<p class="scope">in <b>${esc(scopeLabel(scope))}</b> <a href="${hrefSearch(q)}">× search everywhere</a></p>` : ""}<p class="sub">${plural(total, "title")}${total > SEARCH_MAX ? ` · showing the top ${SEARCH_MAX}` : ""}${shelfHits.length ? ` · ${plural(shelfHits.length, "shelf").replace("shelfs", "shelves")}` : ""}</p>`;
+  if (shelfHits.length) {
+    html += `<div class="chips">${shelfHits.slice(0, 30).map(([si, n]) => `<a href="${hrefShelf(si)}">${esc(shelves[si].path.replace(/ > /g, " › "))}<small>${n}</small></a>`).join("")}</div>`;
+  }
+  main.innerHTML = html;
+  if (!total && !shelfHits.length) main.insertAdjacentHTML("beforeend", `<div class="empty">No titles match. Try fewer words, or check the Format and Type filters.</div>`);
+  if (total) pagedGrid(main, list, null);
+  // A director/actor shelf hit gets its titles shown too, like a mini shelf.
+  const top = shelfHits[0];
+  if (top && shelves[top[0]].label && total < 6) {
+    const si = top[0], sl = visible(shelves[si].works, { shelf: si });
+    const wrap = document.createElement("div");
+    wrap.style.marginTop = "28px";
+    wrap.innerHTML = shelfRow(shelves[si].path.replace(/ > /g, " › "), hrefShelf(si), sl, { shelf: si });
+    main.append(wrap);
+    lazyRows(wrap, [{ list: sl, where: { shelf: si } }]);
+  }
+  searchMask = mask;
+  searchKey = fold(q);
+}
+
+function railHTML() {
+  const { areas: list, disp, colls } = tally();
+  const link = (href, text, n) => `<a href="${href}"><span>${esc(text)}</span><span>${n.toLocaleString()}</span></a>`;
+  const nest = (key, head, items) => `<details data-key="${esc(key)}"><summary>${head}</summary><div class="sub-links">${items}</div></details>`;
+  const searching = railQ !== null;
+  const top = searching
+    ? `<h2>Matches by shelf</h2>${link(hrefSearch(railQ), "Everywhere", searchMask ? works.reduce((n, w, i) => n + (searchMask[i] && passes(w) ? 1 : 0), 0) : 0)}`
+    : "";
+  // The three top-level headings collapse; the viewer's choice is remembered (railOpen).
+  const block = (key, head, body) => `<details class="top" data-top="${key}"${railOpen[key] ?? RAIL_DEFAULT_OPEN[key] ?? true ? " open" : ""}><summary>${head}</summary>${body}</details>`;
+  const boutique = colls.length ? block("boutique", BOUTIQUE, colls.map(({ c, list }) => link(hrefFor("label", c.name), c.name, list.length)).join("")) : "";
+  return `${top}${boutique}${boutique ? `<div class="split">In the store</div>` : ""}${disp.length ? block("front", "Up front", disp.map(({ d, n }) => link(hrefFor("display", d.name), d.name, n)).join("")) : ""}
+    ${block("sections", "Sections", list.map(({ a, members, n }) => {
+      if (a.multi) return nest(a.name, link(hrefFor("area", a.name), a.name, n), members.map(m => link(hrefFor("section", m.sec.name), m.sec.name, m.n)).join(""));
+      const { sec, groups, named } = members[0];
+      if (!named) return link(hrefFor("section", sec.name), sec.name, n);
+      return nest(sec.name, link(hrefFor("section", sec.name), sec.name, n), groups.map(({ g, n }) => link(hrefFor("group", g.section + " > " + g.name), g.name || "Main shelf", n)).join(""));
+    }).join("") + (searching && !list.length ? `<p class="rail-empty">No shelves match.</p>` : ""))}`;
+}
+/* Re-render the rail keeping which sections are open and where it's scrolled. */
+let railKey = null;  // the filters + search the rail was last drawn for
+const RAIL_DEFAULT_OPEN = { boutique: false };
+const railOpen = (() => { try { return JSON.parse(localStorage.getItem("mml-rail-open")) || {}; } catch { return {}; } })();
+try { localStorage.removeItem("mml-rail"); } catch {}  // the earlier closed-only list
+$("#rail").addEventListener("toggle", e => {
+  const d = e.target;
+  if (!d.classList?.contains("top")) return;
+  railOpen[d.dataset.top] = d.open;
+  try { localStorage.setItem("mml-rail-open", JSON.stringify(railOpen)); } catch {}
+}, true);
+function renderRail() {
+  const rail = $("#rail");
+  railKey = currentTallyKey();
+  const open = new Set([...rail.querySelectorAll("details[open]:not(.top)")].map(d => d.dataset.key));
+  const top = rail.scrollTop;
+  rail.innerHTML = railHTML();
+  for (const d of rail.querySelectorAll("details:not(.top)")) if (open.has(d.dataset.key)) d.open = true;
+  rail.scrollTop = top;
+}
+function markRail() {
+  let [, kind, ...rest] = route.split("/");
+  let arg = rest.length ? dec(rest.join("/")) : "";
+  if (kind === "search") {
+    const { scope } = parseSearch(route);
+    [kind, arg] = scope ? [scope.kind, scope.name] : ["", ""];
+  }
+  let section = null, area = null;
+  const wanted = [kind ? hrefFor(kind, arg) : railQ !== null ? hrefSearch(railQ) : "#" + route];  // most specific first
+  if (kind === "section") section = arg;
+  else if (kind === "group") section = arg.split(" > ")[0];
+  else if (kind === "area") area = arg;
+  else if (kind === "shelf") {
+    const si = shelves.findIndex(s => s.path === arg);
+    if (si >= 0) { section = shelves[si].section; const g = groupOf(si); wanted.push(hrefFor("group", g.section + " > " + g.name)); }
+  }
+  if (section && sections.has(section)) { area = sections.get(section).area; wanted.push(hrefFor("section", section)); }
+  if (area) wanted.push(hrefFor("area", area));
+  for (const d of $("#rail").querySelectorAll("details")) if (d.dataset.key === area || d.dataset.key === section) d.open = true;
+  const links = [...$("#rail").querySelectorAll("a")];
+  const target = wanted.find(h => links.some(a => a.getAttribute("href") === h));
+  let cur = null;
+  for (const a of links) {
+    if (a.getAttribute("href") === target) { a.setAttribute("aria-current", "page"); cur = a; } else a.removeAttribute("aria-current");
+  }
+  if (cur) cur.scrollIntoView({ block: "nearest" });
+}
+
+/* ------------------------------------------------------------------ details modal */
+
+/* The store's own ?rental= pages render blank, so link to its title search narrowed to the
+   copy's format; the copy comes up first and opens in the store's pop-up when clicked. */
+const storeHref = (title, fmt) => "https://www.moviemadness.org/search/?" +
+  new URLSearchParams([["query", title], ["search_by", "Title"], ["formats[]", fmt]]).toString().replace(/\+/g, "%20");
+
+const detailCache = new Map();
+async function details(kind, id) {
+  const key = `${kind}/${String(id % 1000).padStart(3, "0")}`;
+  if (!detailCache.has(key)) detailCache.set(key, fetch(`data/details/${key}.json`).then(r => r.json()));
+  return (await detailCache.get(key))[id];
+}
+
+let modalToken = 0;
+async function openModal(code) {
+  const w = byKey.get(code);
+  const dlg = $("#dlg");
+  if (!w) { closeModal(); return; }
+  const token = ++modalToken;
+  const kind = KIND_DIR[w.k];
+  const head = () => `<button class="close" aria-label="Close" onclick="closeModal()">×</button>`;
+  const poster = () => `<div class="poster${posterPending(w) ? " pending" : ""}">${posterHTML(w, "modal")}</div>`;
+  dlg.dataset.k = code;
+  const body = d => {
+    const meta = [w.y, w.k === 1 ? "TV" : null, d && d.length ? (w.k === 1 ? plural(d.length, "season") : `${d.length} min`) : null,
+      d && d.genres.length ? d.genres.join(", ") : null, w.k === 2 && d ? d.lang : null].filter(Boolean).join(" · ");
+    const rentals = d ? d.rentals.map((r, j) => {
+      const [f, s, di] = w.r[j];
+      const fmt = C.formats[f];
+      const cls = fmt === "4K UHD" ? "k" : fmt === "VHS" ? "v" : "";
+      const shelfLink = s >= 0 ? `Shelf: <a href="${hrefShelf(s)}" onclick="closeModalTo(event, this)">${esc(shelves[s].path.replace(/ > /g, " › "))}</a>` : "";
+      const displayLink = di >= 0 ? `<a href="${hrefDisplay(C.displays[di])}" onclick="closeModalTo(event, this)">${esc(C.displays[di])}</a>` : "";
+      const coll = rentalColl.get(w.idx + ":" + j);
+      const collLink = coll ? ` · <a href="${hrefLabel(coll.name)}" onclick="closeModalTo(event, this)">${esc(coll.name)}</a>` : "";
+      const where = (shelfLink && displayLink ? `${shelfLink} · on display: ${displayLink}` : shelfLink || (displayLink && `On display: ${displayLink}`)) + collLink;
+      return `<li><span class="fmt-pill ${cls}">${esc(FMT_SHORT[fmt])}</span>
+        <div><div class="where">${where}</div>
+        ${r.edition ? `<div class="ed">${esc(r.edition)}</div>` : ""}</div>
+        <a class="go" href="${storeHref(r.title, fmt)}" target="_blank" rel="noopener">Store page ↗</a></li>`;
+    }).join("") : `<li><span class="where">Loading…</span></li>`;
+    return `${head()}<div class="modal">${poster()}<div>
+      <h2>${esc(w.t)}</h2>${w.o ? `<div class="meta"><i>${esc(w.o)}</i></div>` : ""}<div class="meta">${esc(meta)}</div>
+      ${d && d.overview ? `<p class="ov">${esc(d.overview)}</p>` : ""}
+      <ul class="rentals">${rentals}</ul>
+      <div class="links">${w.k === 2 ? unmatchedLinks(w, d) : `<a href="https://www.themoviedb.org/${kind}/${w.id}" target="_blank" rel="noopener">TMDB ↗</a>
+      ${w.k ? "" : `<a href="https://letterboxd.com/tmdb/${w.id}/" target="_blank" rel="noopener">Letterboxd ↗</a>`}`}</div>
+    </div></div>`;
+  };
+  dlg.innerHTML = body(null);
+  if (!dlg.open) dlg.showModal();
+  const d = await details(kind, w.id).catch(() => null);
+  if (token === modalToken && dlg.open) dlg.innerHTML = body(d);
+}
+/* Opened by a click here: step back off the history entry it added. Opened from a link
+   (new tab, bookmark, reload): there's nothing of ours to go back to, so drop it from the URL. */
+/* Unmatched titles: help find the right TMDB entry, and show any the matcher turned down. */
+function unmatchedLinks(w, d) {
+  const q = encodeURIComponent(w.t + (w.y ? " y:" + w.y : ""));
+  const rejected = (d && d.rejected || []).map(r => `<a href="https://www.themoviedb.org/${r}" target="_blank" rel="noopener">${esc(r)}</a>`);
+  return `<span>Not matched to TMDB</span><a href="https://www.themoviedb.org/search?query=${q}" target="_blank" rel="noopener">Search TMDB ↗</a>
+    ${rejected.length ? `<span>Rejected match: ${rejected.join(", ")}</span>` : ""}`;
+}
+
+function closeModal() {
+  const { route: r, modal } = parseHash();
+  if (!modal) { if ($("#dlg").open) $("#dlg").close(); return; }
+  if (history.state && history.state.modal) history.back();
+  else { history.replaceState(null, "", "#" + r); render(); }
+}
+function closeModalTo(event, a) {
+  $("#dlg").close();
+  // replace the modal entry so Back doesn't reopen it
+  history.replaceState(null, "", a.getAttribute("href"));
+  render();
+  event.preventDefault();
+}
+window.closeModal = closeModal; window.closeModalTo = closeModalTo;
+
+/* ------------------------------------------------------------------ wiring */
+
+function setSeg(id, v) {
+  for (const b of document.querySelectorAll(`#${id} button`)) b.setAttribute("aria-pressed", String(b.dataset.v === v));
+}
+
+function init() {
+  window.addEventListener("popstate", render);
+  window.addEventListener("hashchange", render);
+
+  let t;
+  $("#q").addEventListener("input", e => {
+    clearTimeout(t);
+    t = setTimeout(() => {
+      const q = e.target.value.trim();
+      const searching = route.startsWith("/search/");
+      if (q) go(hrefSearch(q, searching ? parseSearch(route).scope : null).slice(1), searching);
+      else if (searching) go("/", true);
+    }, 90);
+  });
+  $("#q").addEventListener("keydown", e => {
+    if (e.key === "Escape") { e.target.value = ""; e.target.dispatchEvent(new Event("input")); }
+    if (e.key === "Enter") { const first = $("#main .tile"); if (first) first.focus(); }
+  });
+  document.addEventListener("keydown", e => {
+    if (e.key === "/" && document.activeElement !== $("#q") && !$("#dlg").open) { e.preventDefault(); $("#q").focus(); $("#q").select(); }
+  });
+  // Esc: close through closeModal so the URL and history stay in step.
+  $("#dlg").addEventListener("cancel", e => { e.preventDefault(); closeModal(); });
+  // Any other way the dialog closes; the event arrives late, so ignore it if a title was reopened meanwhile.
+  $("#dlg").addEventListener("close", () => { if (!$("#dlg").open && parseHash().modal) closeModal(); });
+  // Plain clicks on a title open it here and mark the history entry as ours;
+  // ctrl/cmd/middle-click still open it in a new tab via the link.
+  document.addEventListener("click", e => {
+    const a = e.target.closest("a.tile");
+    if (!a || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    e.preventDefault();
+    history.pushState({ modal: true }, "", a.getAttribute("href"));
+    render();
+  });
+  $("#dlg").addEventListener("click", e => { if (e.target === $("#dlg")) closeModal(); });
+
+  const refilter = () => { save(); renderRail(); $("#main").dataset.ready = ""; render(); };
+  for (const id of ["fmt", "kind", "match"]) {
+    $("#" + id).addEventListener("click", e => {
+      const b = e.target.closest("button"); if (!b) return;
+      state[id] = b.dataset.v; setSeg(id, b.dataset.v); refilter();
+    });
+  }
+  $("#main").addEventListener("click", e => {
+    const b = e.target.closest("#sort button"); if (!b) return;
+    sortMode = b.dataset.v; $("#main").dataset.ready = ""; render();
+  });
+
+  try { Object.assign(state, JSON.parse(localStorage.getItem("mml") || "{}")); } catch {}
+  // settings saved by earlier versions: an "Unmatched" type option, then an on/off toggle
+  if (state.kind === "2") Object.assign(state, { kind: "", match: "u" });
+  delete state.unmatched;
+  // Dev view is switched with ?dev=1 / ?dev=0 and remembered; outside it the Type and Match filters are hidden and off.
+  const devParam = new URLSearchParams(location.search).get("dev");
+  if (devParam !== null) {
+    try { devParam === "0" ? localStorage.removeItem("mml-dev") : localStorage.setItem("mml-dev", "1"); } catch {}
+    history.replaceState(history.state, "", location.pathname + location.hash);
+  }
+  let dev = devParam !== null ? devParam !== "0" : false;
+  if (devParam === null) try { dev = localStorage.getItem("mml-dev") === "1"; } catch {}
+  document.body.classList.toggle("dev", dev);
+  if (!dev) Object.assign(state, { kind: "", match: "" });
+  setSeg("fmt", state.fmt); setSeg("kind", state.kind); setSeg("match", state.match);
+  renderRail();
+  render();
+}
+function save() { try { localStorage.setItem("mml", JSON.stringify(state)); } catch {} }
+
+load().then(() => { init(); loadPosters(); }).catch(err => {
+  $("#main").innerHTML = `<div class="empty">Couldn't load the catalog (${esc(err.message)}). Run <code>python3 build.py</code> and serve the <code>site/</code> folder.</div>`;
+});
+</script>
+</body>
+</html>

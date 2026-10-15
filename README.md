@@ -9,7 +9,7 @@ python3 build.py            # fetch catalog if it changed, look up new TMDB ids,
 python3 -m http.server -d site 8765
 ```
 
-`build.py` uses only the Python standard library and reads a TMDB read-access token from `~/.config/mmboxmonkey/tmdb-token`.
+`build.py` uses only the Python standard library and reads a TMDB read-access token from the `TMDB_TOKEN` environment variable, or else `~/.config/mmboxmonkey/tmdb-token`.
 
 - **TMDB usage.** Each id is fetched once, throttled to 20 requests/s over 6 connections (TMDB's ceiling is about 50/s), with backoff on 429/5xx. Results are kept in `cache/tmdb.jsonl`. After the first run (about 50 minutes for ~55k titles), a daily rebuild looks up titles new to the catalog, plus 1/120th of the cache, oldest first, once entries are 30 days old. That's about 465 lookups (~25 s) a day, which keeps every entry under ~150 days old, within TMDB's six-month caching limit. Anything that does reach 180 days, e.g. after a long gap between builds, is always refreshed.
 - **The token stays local.** The browser never calls the TMDB API. It loads `data/catalog.json` and fetches posters from TMDB's image CDN.
@@ -23,9 +23,19 @@ python3 -m http.server -d site 8765
 
 ```
 site/index.html                     the whole app: inline CSS + JS, no dependencies
-site/data/catalog.json              titles, years, shelves, displays (~1.75 MB gzipped)
+site/data/catalog.json              titles, years, shelves, displays, labels (~1.8 MB gzipped)
 site/data/posters.json              poster paths, one per catalog title (~1.2 MB gzipped; loaded in parallel)
-site/data/details/{movie,tv}/NNN.json  overviews + store links, loaded when a title is opened
+site/data/details/{movie,tv,unmatched}/NNN.json  overviews + store titles, loaded when a title is opened
+seed/store-terms.json               the store's sections and shelves, used if moviemadness.org can't be reached
 ```
 
-Deploy `site/` to any static host that serves gzip, such as GitHub Pages.
+## Deploying
+
+`.github/workflows/deploy.yml` runs `build.py` daily at about 6am Pacific, on every push to `master`, and when started by hand from the Actions tab. It then publishes `site/` to GitHub Pages. Setup:
+
+1. Add the TMDB read-access token as a repository secret named `TMDB_TOKEN`. The run fails without it rather than publish a site with no posters.
+2. In Settings → Pages, set Source to **GitHub Actions**.
+
+`cache/` (TMDB lookups and catalog shards) is kept between runs with the Actions cache. A daily run makes about 465 TMDB refresh lookups (~25 s). If the cache is lost (unused for 7 days), the next run looks everything up again: about 56k lookups, ~50 minutes, still within TMDB's limits.
+
+The link preview tags in `site/index.html` (`og:url`, `og:image`) assume the site lives at `https://tjsander.github.io/movie-madness-lite/`; change them if it doesn't.

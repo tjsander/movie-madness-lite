@@ -1,0 +1,66 @@
+# Rebuild the catalog daily and publish site/ to GitHub Pages.
+# Needs: repository secret TMDB_TOKEN (TMDB v4 read access token), and
+# Settings > Pages > Source set to "GitHub Actions".
+name: Build and deploy
+
+on:
+  schedule:
+    - cron: "17 13 * * *"  # daily, ~6am Pacific
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120  # a cold cache means ~56k TMDB lookups, about 50 minutes
+    steps:
+      - uses: actions/checkout@v5
+
+      # cache/ holds the TMDB lookups (tmdb.jsonl) and catalog shards between runs.
+      # Each run saves a new entry; the newest is restored. Unused entries expire after 7 days.
+      - name: Restore build cache
+        uses: actions/cache/restore@v4
+        with:
+          path: cache
+          key: build-cache-${{ github.run_id }}
+          restore-keys: build-cache-
+
+      - name: Build
+        env:
+          TMDB_TOKEN: ${{ secrets.TMDB_TOKEN }}
+        run: |
+          # without the token the build still works but publishes a site with no posters
+          test -n "$TMDB_TOKEN" || { echo "::error::Add the TMDB_TOKEN repository secret"; exit 1; }
+          python3 build.py
+
+      # Saved even if the build fails, so TMDB lookups already made aren't repeated.
+      - name: Save build cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: cache
+          key: build-cache-${{ github.run_id }}
+
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

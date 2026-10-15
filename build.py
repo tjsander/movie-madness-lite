@@ -30,7 +30,7 @@ from pathlib import Path
 
 API = "https://tjsander.github.io/movie-madness-pdx-tmdb"
 TMDB = "https://api.themoviedb.org/3"
-TOKEN_FILE = Path.home() / ".config/mmboxmonkey/tmdb-token"
+TOKEN_FILE = Path.home() / ".config/mmboxmonkey/tmdb-token"  # or the TMDB_TOKEN environment variable
 KINDS = ("movie", "tv")
 KIND_CODE = {"movie": 0, "tv": 1, "unmatched": 2}
 SHARDS = 1000
@@ -38,6 +38,7 @@ SHARDS = 1000
 ROOT = Path(__file__).resolve().parent
 CACHE = ROOT / "cache"
 SITE = ROOT / "site"
+SEED = ROOT / "seed"  # committed fallbacks for a fresh checkout (e.g. CI) when a live fetch fails
 
 RATE = 20          # TMDB requests per second (TMDB's ceiling is ~50/s per IP)
 WORKERS = 6        # concurrent connections (TMDB allows ~20)
@@ -141,6 +142,13 @@ def label_of(title):
     return None
 
 
+def tmdb_token():
+    """The TMDB v4 read token: $TMDB_TOKEN (CI), else TOKEN_FILE. Never written anywhere."""
+    if token := os.environ.get("TMDB_TOKEN", "").strip():
+        return token
+    return TOKEN_FILE.read_text().strip() if TOKEN_FILE.exists() else None
+
+
 def log(*a):
     print(*a, file=sys.stderr, flush=True)
 
@@ -231,9 +239,10 @@ def fetch_store_terms(refresh):
                 page += 1
             terms[tax] = sorted(set(names))
     except (urllib.error.URLError, TimeoutError, ValueError) as e:
-        if path.exists():
-            log(f"couldn't refresh store terms ({e}); using cached")
-            return json.loads(path.read_text())
+        for fallback in (path, SEED / "store-terms.json"):
+            if fallback.exists():
+                log(f"couldn't refresh store terms ({e}); using {fallback.relative_to(ROOT)}")
+                return json.loads(fallback.read_text())
         raise
     path.write_text(json.dumps(terms, ensure_ascii=False))
     log(f"store terms: {len(terms['genre'])} super-sections, {len(terms['location'])} shelves")
@@ -370,16 +379,17 @@ def enrich(works):
     todo = new + must + due
     if must or due:
         log(f"TMDB refresh: {len(due)} oldest entries" + (f", plus {len(must)} past {CACHE_DAYS} days" if must else ""))
+    token = tmdb_token()
     if todo:
-        if not TOKEN_FILE.exists():
-            log(f"no TMDB token at {TOKEN_FILE}; skipping {len(todo)} lookups")
+        if not token:
+            log(f"no TMDB token (TMDB_TOKEN or {TOKEN_FILE}); skipping {len(todo)} lookups")
             todo = []
         else:
             eta = len(todo) / RATE
             log(f"TMDB: {len(todo)} lookups to do (~{eta / 60:.0f} min at {RATE}/s), {len(cache)} cached")
 
     if todo:
-        auth = {"Authorization": f"Bearer {TOKEN_FILE.read_text().strip()}", "Accept": "application/json"}
+        auth = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
         limiter = RateLimiter(RATE)
         write_lock = threading.Lock()
         done = [0]
@@ -577,8 +587,8 @@ def main():
         (CACHE / "shards" / "unmatched.json").write_text(json.dumps(get(f"{API}/unmatched.json"), ensure_ascii=False))
     unmatched = load_unmatched()
     if args.no_tmdb:
-        global TOKEN_FILE
-        TOKEN_FILE = Path("/nonexistent")
+        global tmdb_token
+        tmdb_token = lambda: None
     terms = fetch_store_terms(refresh=not args.no_fetch or not (CACHE / "store-terms.json").exists())
     tmdb = enrich(works)
     everything = {**works, **unmatched}

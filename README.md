@@ -31,7 +31,7 @@ seed/store-terms.json               the store's sections and shelves, used if mo
 
 ## Deploying
 
-`.github/workflows/deploy.yml` runs `build.py` daily at about 6am Pacific, on every push to `master`, and when started by hand from the Actions tab. It then publishes `site/` to GitHub Pages. Setup:
+`.github/workflows/deploy.yml` runs `build.py` daily at about 6am Pacific, on every push to `main`, and when started by hand from the Actions tab. It then publishes `site/` to GitHub Pages. Setup:
 
 1. Add the TMDB read-access token as a repository secret named `TMDB_TOKEN`. The run fails without it rather than publish a site with no posters.
 2. In Settings → Pages, set Source to **GitHub Actions**.

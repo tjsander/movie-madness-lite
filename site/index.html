@@ -67,7 +67,8 @@ header {
 }
 .brand b { color: var(--accent); }
 .brand small { font-size: 11px; font-weight: 700; letter-spacing: .14em; color: var(--muted); }
-.search { flex: 1 1 320px; position: relative; min-width: 0; }
+.search { flex: 1 1 200px; min-width: 0; }
+.field { position: relative; }
 .search input {
   width: 100%; font: inherit; font-size: 16px; padding: 10px 40px 10px 14px; border-radius: 10px;
   border: 1px solid var(--line); background: var(--panel); color: var(--ink);
@@ -78,9 +79,25 @@ header {
   border: 1px solid var(--line); border-radius: 4px; padding: 3px 6px; color: var(--muted);
 }
 .filters { display: flex; gap: 6px; flex-wrap: wrap; }
+/* "Filters": a dropdown after the format pills on desktop; a row under the search box on phones */
+.more { font-size: 13px; position: relative; order: 1; }
+.more > summary { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-weight: 600; white-space: nowrap; }
+.more > summary:hover { color: var(--ink); }
+#more-note { font-weight: 400; }
+#more-note:not(:empty)::before { content: "· "; }
+.more-body { display: flex; gap: 6px; flex-wrap: wrap; }
+@media (min-width: 861px) {
+  .more > summary { padding: 6px 12px; border: 1px solid var(--line); border-radius: 999px; background: var(--panel); }
+  .more[open] > summary { color: var(--ink); }
+  .more-body {
+    position: absolute; right: 0; top: calc(100% + 6px); z-index: 30; padding: 10px;
+    background: var(--bg); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 8px 24px rgb(0 0 0 / .15);
+  }
+}
 .seg { flex: none; display: inline-flex; border: 1px solid var(--line); border-radius: 999px; overflow: hidden; background: var(--panel); }
 .seg button { border: 0; background: none; padding: 6px 11px; font-size: 13px; cursor: pointer; white-space: nowrap; }
 .seg button[aria-pressed="true"] { background: var(--ink); color: var(--bg); }
+.seg span { align-self: center; padding: 0 4px 0 11px; font-size: 12px; color: var(--muted); }
 /* dev view (?dev=1): extra filters for checking the data, hidden from everyone else */
 body:not(.dev) .dev-only { display: none; }
 .dev-badge { align-self: center; font-size: 12px; font-weight: 700; color: var(--accent-text); text-decoration: none; border: 1px dashed var(--accent); border-radius: 999px; padding: 4px 10px; white-space: nowrap; }
@@ -88,7 +105,7 @@ body:not(.dev) .dev-only { display: none; }
 /* layout */
 .wrap { display: grid; grid-template-columns: 240px minmax(0, 1fr); max-width: 1500px; margin: 0 auto; }
 nav.rail {
-  position: sticky; top: 61px; align-self: start; height: calc(100vh - 61px); overflow-y: auto;
+  position: sticky; top: var(--hdr, 61px); align-self: start; height: calc(100vh - var(--hdr, 61px)); overflow-y: auto;
   padding: 14px 8px 40px 16px; border-right: 1px solid var(--line); font-size: 14px;
 }
 .rail h2 { font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); margin: 14px 8px 6px; }
@@ -104,6 +121,9 @@ main { padding: 16px 16px 60px; min-width: 0; }
 @media (max-width: 860px) {
   header { position: static; }
   .filters { width: 100%; }
+  .more { order: 0; width: 100%; margin-top: -8px; }
+  .more > summary { padding: 2px 4px; }
+  .more-body { padding: 6px 0 2px; }
   .wrap { grid-template-columns: minmax(0, 1fr); }
   nav.rail { display: none; }
   .search kbd { display: none; }
@@ -145,6 +165,8 @@ a.tag:hover { filter: brightness(1.06); text-decoration: underline; }
 }
 .tile:hover .poster { transform: translateY(-3px); }
 .poster img { width: 100%; height: 100%; object-fit: cover; display: block; }
+/* posters of adult titles, unless Filters › Adult is Show */
+body:not(.show-adult) img.xp { filter: blur(14px) saturate(.7); scale: 1.15; }
 .poster .noimg {
   position: absolute; inset: 0; display: grid; place-items: center; padding: 10px; text-align: center;
   font-weight: 700; font-size: 13px; color: var(--muted);
@@ -281,9 +303,27 @@ footer p { margin: 4px 0; }
   <div class="bar">
     <a class="brand" href="#/"><span>Movie <b>Madness</b></span><small>Lite</small></a>
     <div class="search">
-      <input id="q" type="search" placeholder="Search titles, directors, actors, shelves…" autocomplete="off" spellcheck="false" aria-label="Search the catalog">
-      <kbd>/</kbd>
+      <div class="field">
+        <input id="q" type="search" placeholder="Search titles, directors, actors, shelves…" autocomplete="off" spellcheck="false" aria-label="Search the catalog">
+        <kbd>/</kbd>
+      </div>
     </div>
+    <details class="more" id="more">
+      <summary><span class="caret"></span>Filters<span id="more-note"></span></summary>
+      <div class="more-body">
+        <div class="seg" id="art" role="group" aria-label="Poster language" title="Show English posters, or each foreign film's original-language poster">
+          <span>Posters</span>
+          <button data-v="" aria-pressed="true">English</button>
+          <button data-v="o" aria-pressed="false">Original Language</button>
+        </div>
+        <div class="seg" id="adult" role="group" aria-label="Adult content" title="Blur the posters of adult titles (the Adult Theme section, and films TMDB flags as adult or erotic), show them, or hide those titles altogether">
+          <span>Adult</span>
+          <button data-v="" aria-pressed="true">Blur</button>
+          <button data-v="s" aria-pressed="false">Show</button>
+          <button data-v="h" aria-pressed="false">Hide</button>
+        </div>
+      </div>
+    </details>
     <div class="filters">
       <div class="seg" id="fmt" role="group" aria-label="Format">
         <button data-v="" aria-pressed="true">All</button>
@@ -349,9 +389,13 @@ const BOUTIQUE = "Boutique Labels";
 const HOME_LABELS = ["Criterion Collection"];
 const HOME_DISPLAYS = ["New Arrival", "New Release", "New Release (Foreign)", "Staff Picks", "Curated"];
 let byKey = new Map();
-const state = { fmt: "", kind: "", match: "" };  // match: "" all, "m" matched to TMDB, "u" unmatched
+const state = { fmt: "", kind: "", match: "", art: "", adult: "" };
+// match: "" all, "m" matched to TMDB, "u" unmatched; art: "o" original-language posters for foreign titles;
+// adult: "" blur adult titles' posters, "s" show them, "h" hide adult titles
+const ADULT_SECTION = "Adult Theme";
 let io;              // shared IntersectionObserver for lazy shelf rows
 let postersReq = null, postersLoaded = false;  // most poster paths arrive separately, in posters.json
+let altReq = null;  // posters-orig.json, fetched the first time original-language posters are chosen
 
 /* ------------------------------------------------------------------ data */
 
@@ -403,6 +447,10 @@ async function load() {
     for (const g of sec.groups) g.shelves.sort((a, b) => byName({ name: shelves[a].name }, { name: shelves[b].name }));
   }
   for (const s of shelves) { s.fold = " " + fold([s.section, s.group, s.name].join(" ")); s.nameFold = s.name ? " " + fold(s.name) : ""; }
+  // adult: flagged adult or erotic by TMDB, or on one of the store's Adult Theme shelves. Their posters
+  // are blurred unless Filters › Adult is Show, and Hide removes them.
+  for (const i of C.explicit || []) works[i].adult = true;
+  for (const w of works) w.adult ||= w.r.some(([, s]) => s >= 0 && shelves[s].section === ADULT_SECTION);
   // store areas holding several sections ("TV" › "British TV"); a section on its own is its own area
   for (const sec of sections.values()) {
     sec.area = (C.areas || {})[sec.name] || sec.name;
@@ -447,8 +495,9 @@ function passes(w, where) {
   return false;
 }
 /* Films/TV narrows the matched titles; unmatched ones have no known type, so only the match filter applies. */
-const kindOk = w => (w.k === 2 ? state.match !== "m" : state.match !== "u" && (state.kind === "" || String(w.k) === state.kind));
-const visible = (list, where) => (state.fmt || state.kind !== "" || state.match || searchMask
+const kindOk = w => (state.adult !== "h" || !w.adult) &&
+  (w.k === 2 ? state.match !== "m" : state.match !== "u" && (state.kind === "" || String(w.k) === state.kind));
+const visible = (list, where) => (state.fmt || state.kind !== "" || state.match || state.adult === "h" || searchMask
   ? list.filter(i => (!searchMask || searchMask[i]) && passes(works[i], where)) : list);
 
 /* While searching, the rail counts only titles matching the text (searchMask), and its links
@@ -559,9 +608,10 @@ function renderRoute() {
 /* Matched titles without a path yet are waiting on posters.json: show an empty placeholder, not the title. */
 const posterPending = w => !w.p && !postersLoaded && w.k !== 2;
 function posterHTML(w, kind) {
+  const x = w.adult ? ` class="xp"` : "";
   if (w.p) return kind === "tile"
-    ? `<img loading="lazy" decoding="async" alt="" src="${IMG}w154/${w.p}.jpg" srcset="${IMG}w154/${w.p}.jpg 1x, ${IMG}w342/${w.p}.jpg 2x">`
-    : `<img alt="" src="${IMG}w342/${w.p}.jpg">`;
+    ? `<img${x} loading="lazy" decoding="async" alt="" src="${IMG}w154/${w.p}.jpg" srcset="${IMG}w154/${w.p}.jpg 1x, ${IMG}w342/${w.p}.jpg 2x">`
+    : `<img${x} alt="" src="${IMG}w342/${w.p}.jpg">`;
   return posterPending(w) ? `<div class="noimg"></div>` : `<div class="noimg">${esc(w.t)}</div>`;
 }
 
@@ -573,13 +623,39 @@ async function loadPosters() {
     if (P.built !== C.built) P = await fetch("data/posters.json?v=" + encodeURIComponent(C.built)).then(r => r.json());
     if (P.built === C.built) P.posters.forEach((p, i) => { if (p && !works[i].p) works[i].p = p; });
   } catch (e) { console.warn("posters.json:", e); }
+  for (const w of works) w.po = w.p;  // the default (English) poster, to switch back to
   postersLoaded = true;
+  if (state.art) await applyArt();
   for (const a of document.querySelectorAll("a.tile.pending")) {
     a.classList.remove("pending");
     a.querySelector(".noimg").outerHTML = posterHTML(byKey.get(a.dataset.k), "tile");
   }
   const dlg = $("#dlg"), pending = dlg.open && dlg.querySelector(".modal > .poster.pending");
   if (pending) { pending.classList.remove("pending"); pending.innerHTML = posterHTML(byKey.get(dlg.dataset.k), "modal"); }
+}
+
+/* Swap foreign titles between English posters (the default) and original-language ones. */
+async function applyArt() {
+  if (!postersLoaded) return;  // loadPosters applies the setting once the default posters are in
+  let alt = {};
+  if (state.art) {
+    const get = v => fetch("data/posters-orig.json" + (v ? "?v=" + encodeURIComponent(C.built) : "")).then(r => r.json());
+    try {
+      altReq ||= get().then(A => (A.built === C.built ? A : get(true)));
+      const A = await altReq;
+      if (A.built === C.built) alt = A.posters;
+    } catch (e) { console.warn("posters-orig.json:", e); altReq = null; }
+  }
+  for (const w of works) w.p = w.po;
+  for (const [i, p] of Object.entries(alt)) works[i].p = p;
+  // swap the images in place, so the page keeps its scroll position
+  for (const a of document.querySelectorAll("a.tile:not(.pending)")) {
+    const w = byKey.get(a.dataset.k), el = a.querySelector(".poster > img, .poster > .noimg");
+    const src = el?.tagName === "IMG" ? el.getAttribute("src") : null;
+    if (w && el && (w.p ? !src?.endsWith(`/${w.p}.jpg`) : src)) el.outerHTML = posterHTML(w, "tile");
+  }
+  const dlg = $("#dlg"), mp = dlg.open && dlg.querySelector(".modal > .poster:not(.pending)");
+  if (mp) mp.innerHTML = posterHTML(byKey.get(dlg.dataset.k), "modal");
 }
 
 function tile(i, where) {
@@ -693,7 +769,7 @@ function viewHome() {
 /* Sections, shelf groups and displays with counts under the current filters, empty ones dropped.
    Recomputed only when a filter changes. */
 let tallyKey = null, tallyCache = null;
-const currentTallyKey = () => state.fmt + "|" + state.kind + "|" + state.match + "|" + (searchMask ? searchKey : "");
+const currentTallyKey = () => state.fmt + "|" + state.kind + "|" + state.match + "|" + state.adult + "|" + (searchMask ? searchKey : "");
 function tally() {
   const key = currentTallyKey();
   if (key === tallyKey) return tallyCache;
@@ -905,7 +981,7 @@ function viewSearch(q, scope) {
     html += `<div class="chips">${shelfHits.slice(0, 30).map(([si, n]) => `<a href="${hrefShelf(si)}">${esc(shelves[si].path.replace(/ > /g, " › "))}<small>${n}</small></a>`).join("")}</div>`;
   }
   main.innerHTML = html;
-  if (!total && !shelfHits.length) main.insertAdjacentHTML("beforeend", `<div class="empty">No titles match. Try fewer words, or check the Format and Type filters.</div>`);
+  if (!total && !shelfHits.length) main.insertAdjacentHTML("beforeend", `<div class="empty">No titles match. Try fewer words, or check the filters.</div>`);
   if (total) pagedGrid(main, list, null);
   // A director/actor shelf hit gets its titles shown too, like a mini shelf.
   const top = shelfHits[0];
@@ -1116,6 +1192,24 @@ function init() {
       state[id] = b.dataset.v; setSeg(id, b.dataset.v); refilter();
     });
   }
+  $("#art").addEventListener("click", e => {
+    const b = e.target.closest("button"); if (!b || b.dataset.v === state.art) return;
+    state.art = b.dataset.v; setSeg("art", state.art); save(); applyArt(); filterNote();
+  });
+  $("#adult").addEventListener("click", e => {
+    const b = e.target.closest("button"); if (!b || b.dataset.v === state.adult) return;
+    const refilterNeeded = (b.dataset.v === "h") !== (state.adult === "h");
+    state.adult = b.dataset.v; setSeg("adult", state.adult); filterNote(); adultClass();
+    if (refilterNeeded) refilter(); else save();  // Blur ⇄ Show only restyles the posters
+  });
+  // Filters: when closed, its summary names any non-default choice. As a desktop dropdown it
+  // closes on a click elsewhere or Esc.
+  const dropdown = () => matchMedia("(min-width: 861px)").matches;
+  document.addEventListener("click", e => { if ($("#more").open && dropdown() && !e.target.closest("#more")) $("#more").open = false; });
+  $("#more").addEventListener("keydown", e => { if (e.key === "Escape" && dropdown()) { $("#more").open = false; $("#more summary").focus(); } });
+  // the sidebar sits just below the header, whose height changes with the Filters row
+  const header = $("header");
+  new ResizeObserver(() => document.documentElement.style.setProperty("--hdr", header.offsetHeight + "px")).observe(header);
   $("#main").addEventListener("click", e => {
     const b = e.target.closest("#sort button"); if (!b) return;
     sortMode = b.dataset.v; $("#main").dataset.ready = ""; render();
@@ -1125,6 +1219,7 @@ function init() {
   // settings saved by earlier versions: an "Unmatched" type option, then an on/off toggle
   if (state.kind === "2") Object.assign(state, { kind: "", match: "u" });
   delete state.unmatched;
+  if (state.art !== "o") state.art = "";  // "e" (English) was an option while original-language posters were the default
   // Dev view is switched with ?dev=1 / ?dev=0 and remembered; outside it the Type and Match filters are hidden and off.
   const devParam = new URLSearchParams(location.search).get("dev");
   if (devParam !== null) {
@@ -1135,10 +1230,14 @@ function init() {
   if (devParam === null) try { dev = localStorage.getItem("mml-dev") === "1"; } catch {}
   document.body.classList.toggle("dev", dev);
   if (!dev) Object.assign(state, { kind: "", match: "" });
-  setSeg("fmt", state.fmt); setSeg("kind", state.kind); setSeg("match", state.match);
+  setSeg("fmt", state.fmt); setSeg("art", state.art); setSeg("adult", state.adult); filterNote(); adultClass(); setSeg("kind", state.kind); setSeg("match", state.match);
   renderRail();
   render();
 }
+function filterNote() {
+  $("#more-note").textContent = [state.art === "o" && "original-language posters", state.adult === "s" && "adult shown", state.adult === "h" && "adult hidden"].filter(Boolean).join(" · ");
+}
+function adultClass() { document.body.classList.toggle("show-adult", state.adult === "s"); }
 function save() { try { localStorage.setItem("mml", JSON.stringify(state)); } catch {} }
 
 load().then(() => { init(); loadPosters(); }).catch(err => {

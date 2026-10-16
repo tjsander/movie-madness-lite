@@ -13,6 +13,7 @@
 Usage: python3 build.py [--no-fetch] [--no-tmdb]
 """
 import argparse
+import gzip
 import html
 import json
 import os
@@ -335,6 +336,101 @@ class RateLimiter:
             self.next = max(self.next, time.monotonic() + seconds)
 
 
+# TMDB's original_language codes whose posters are tagged with another code
+POSTER_LANG = {"cn": "zh"}
+
+
+# Poster scores count every poster as having VOTE_PRIOR extra votes at TMDB's neutral score, so a
+# handful of perfect votes doesn't outrank a well-liked poster (4 votes at 10 vs 36 at 7.6).
+VOTE_PRIOR, VOTE_NEUTRAL = 5, 3.33
+
+
+def best_poster(posters, lang, default=None):
+    """The highest-scoring poster in a language; ties go to TMDB's default, then to TMDB's order."""
+    def score(p):
+        n = p.get("vote_count") or 0
+        return ((p.get("vote_average") or 0) * n + VOTE_NEUTRAL * VOTE_PRIOR) / (n + VOTE_PRIOR), p["file_path"] == default
+    ps = [p for p in posters if p.get("iso_639_1") == lang]
+    return max(ps, key=score)["file_path"] if ps else None
+
+
+def fetch_adult_ids(refresh):
+    """TMDB ids it flags as adult (pornographic), from its daily export files: no API calls.
+
+    A new day's files appear around 8am UTC, so fall back a few days; then to the cached copy."""
+    path = CACHE / "adult-ids.json"
+    cached = json.loads(path.read_text()) if path.exists() else None
+    today = datetime.now(timezone.utc).date()
+    if refresh and (not cached or cached["date"] != today.isoformat()):
+        for back in range(4):
+            day = today - timedelta(days=back)
+            try:
+                ids = {}
+                for kind, name in (("movie", "adult_movie_ids"), ("tv", "adult_tv_series_ids")):
+                    url = f"https://files.tmdb.org/p/exports/{name}_{day:%m_%d_%Y}.json.gz"
+                    req = urllib.request.Request(url, headers={"User-Agent": "movie-madness-lite"})
+                    with urllib.request.urlopen(req, timeout=60) as r:
+                        ids[kind] = sorted({json.loads(line)["id"] for line in gzip.decompress(r.read()).splitlines() if line.strip()})
+                cached = {"date": today.isoformat(), "export": day.isoformat(), **ids}
+                CACHE.mkdir(exist_ok=True)
+                path.write_text(json.dumps(cached))
+                break
+            except (urllib.error.URLError, TimeoutError, ConnectionError, OSError, ValueError) as e:
+                log(f"TMDB adult export for {day}: {e}")
+    if not cached:
+        log("no TMDB adult list; adult posters won't be blurred")
+        return set()
+    log(f"TMDB adult list from {cached['export']}: {len(cached['movie'])} movies, {len(cached['tv'])} TV series")
+    return {("movie", i) for i in cached["movie"]} | {("tv", i) for i in cached["tv"]}
+
+
+# TMDB keywords for erotic films, whose posters are blurred like adult-flagged ones. Not "erotic
+# thriller" or "sexploitation": those take in studio R-rated films (Dressed to Kill, Unfaithful).
+EROTIC_KEYWORDS = {
+    155477: "softcore", 256466: "erotic", 325693: "erotica", 238059: "gay erotica",
+    355313: "lesbian erotica", 219371: "vintage erotica", 350793: "greek erotica", 334900: "swedish erotica",
+    302868: "erotic comedy", 298666: "erotic romance", 155691: "erotic vignettes", 337325: "erotic anthology",
+    381597: "pinku eiga", 374679: "gay pinku",
+}
+EROTIC_DAYS = 7  # how long the keyword lists are kept before asking TMDB again (~215 requests)
+# Hand corrections to the blur list: True blurs a title the keywords miss, False un-blurs a wrong tag.
+BLUR_FIXES = {
+    # ("movie", 12345): False,
+}
+
+
+def fetch_erotic_ids():
+    """TMDB movie ids tagged with an EROTIC_KEYWORDS keyword, via discover (20 per request)."""
+    path = CACHE / "erotic-ids.json"
+    cached = json.loads(path.read_text()) if path.exists() else None
+    fresh = cached and cached.get("keywords") == sorted(EROTIC_KEYWORDS) and \
+        datetime.fromisoformat(cached["fetched"]) > datetime.now(timezone.utc) - timedelta(days=EROTIC_DAYS)
+    token = tmdb_token()
+    if not fresh and token:
+        auth = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+        limiter = RateLimiter(RATE)
+        ids, requests = set(), 0
+        try:
+            for kid in EROTIC_KEYWORDS:
+                page = pages = 1
+                while page <= min(pages, 500):  # discover stops at page 500
+                    limiter.wait()
+                    d = get(f"{TMDB}/discover/movie?with_keywords={kid}&include_adult=false&page={page}", auth)
+                    requests += 1
+                    ids.update(m["id"] for m in d["results"])
+                    pages = d["total_pages"]
+                    page += 1
+            cached = {"fetched": datetime.now(timezone.utc).isoformat(), "keywords": sorted(EROTIC_KEYWORDS), "movie": sorted(ids)}
+            CACHE.mkdir(exist_ok=True)
+            path.write_text(json.dumps(cached))
+            log(f"TMDB erotic keywords: {len(ids)} films ({requests} requests)")
+        except (urllib.error.URLError, TimeoutError, ConnectionError, OSError, ValueError) as e:
+            log(f"TMDB erotic keyword lists: {e}; " + ("using the cached lists" if cached else "skipping"))
+    if not cached:
+        return set()
+    return {("movie", i) for i in cached["movie"]}
+
+
 def trim(kind, d):
     """Keep only the TMDB fields the site uses."""
     if kind == "movie":
@@ -342,11 +438,18 @@ def trim(kind, d):
     else:
         title, orig, date = d.get("name"), d.get("original_name"), d.get("first_air_date")
         length = d.get("number_of_seasons")
+    posters = (d.get("images") or {}).get("posters") or []
+    lang = d.get("original_language")
+    poster = best_poster(posters, "en", d.get("poster_path")) or d.get("poster_path")
+    poster_orig = best_poster(posters, POSTER_LANG.get(lang, lang)) if lang and lang != "en" else None
     return {
         "title": title or orig or "",
         "orig": orig if orig and orig != title else None,
         "year": int(date[:4]) if date and date[:4].isdigit() else None,
-        "poster": d.get("poster_path"),
+        # the best-voted English poster (TMDB's own pick when it has none), and for a
+        # foreign-language title its best-voted original-language poster when that differs
+        "poster": poster,
+        "poster_orig": poster_orig if poster_orig != poster else None,
         "overview": (d.get("overview") or "").strip() or None,
         "length": length or None,
         "genres": [g["name"] for g in d.get("genres", [])],
@@ -373,12 +476,16 @@ def enrich(works):
     settled = (now - timedelta(days=REFRESH_MIN_DAYS)).isoformat()
     cached = [k for k in works if k in cache]
     new = [k for k in works if k not in cache]
-    must = [k for k in cached if cache[k]["fetched"] < expired]
+    # entries cached before posters were chosen by vote (no "poster_orig") are all refreshed at once
+    must = [k for k in cached if cache[k]["fetched"] < expired
+            or (cache[k]["info"] is not None and "poster_orig" not in cache[k]["info"])]
     share = -(-len(cached) // REFRESH_CYCLE_DAYS)  # ceil
-    due = sorted((k for k in cached if expired <= cache[k]["fetched"] < settled), key=lambda k: cache[k]["fetched"])[:share]
+    must_set = set(must)
+    due = sorted((k for k in cached if k not in must_set and expired <= cache[k]["fetched"] < settled),
+                 key=lambda k: cache[k]["fetched"])[:share]
     todo = new + must + due
     if must or due:
-        log(f"TMDB refresh: {len(due)} oldest entries" + (f", plus {len(must)} past {CACHE_DAYS} days" if must else ""))
+        log(f"TMDB refresh: {len(due)} oldest entries" + (f", plus {len(must)} past {CACHE_DAYS} days or from an older build" if must else ""))
     token = tmdb_token()
     if todo:
         if not token:
@@ -395,12 +502,24 @@ def enrich(works):
         done = [0]
         out = cache_file.open("a")
 
+        def fetch_one(kind, tid):
+            # The poster lists come in the same request, for English and, when the cache already
+            # knows it, the original language. A new foreign title needs a second request for them.
+            known = ((cache.get((kind, tid)) or {}).get("info") or {}).get("lang")
+            langs = ["en"] + ([POSTER_LANG.get(known, known)] if known and known != "en" else [])
+            d = get(f"{TMDB}/{kind}/{tid}?language=en-US&append_to_response=images&include_image_language={','.join(langs)}", auth)
+            lang = POSTER_LANG.get(d.get("original_language"), d.get("original_language"))
+            if lang and lang not in langs and lang != "xx":
+                limiter.wait()
+                d.setdefault("images", {}).setdefault("posters", []).extend(get(f"{TMDB}/{kind}/{tid}/images?include_image_language={lang}", auth).get("posters") or [])
+            return trim(kind, d)
+
         def one(key):
             kind, tid = key
             for attempt in range(6):
                 limiter.wait()
                 try:
-                    info = trim(kind, get(f"{TMDB}/{kind}/{tid}?language=en-US", auth))
+                    info = fetch_one(kind, tid)
                     break
                 except urllib.error.HTTPError as e:
                     if e.code == 404:  # id removed from TMDB
@@ -472,7 +591,7 @@ def clean_store_title(t):
     return f"{m.group(2)} {m.group(1)}" if m else t
 
 
-def build(works, tmdb, index, tree):
+def build(works, tmdb, index, tree, blur=frozenset()):
     shelves, displays = {}, {}
 
     def idx(table, name):
@@ -480,7 +599,8 @@ def build(works, tmdb, index, tree):
             table[name] = len(table)
         return table[name]
 
-    out_works, posters = [], []
+    out_works, posters, posters_orig = [], [], {}
+    explicit = []  # catalog indices of titles TMDB flags as adult or tags as erotic
     labelled = {}  # label -> [(work index, rental index)]
     details = {(k, n): {} for k in (*KINDS, "unmatched") for n in range(SHARDS)}
     for (kind, tid), rentals in works.items():
@@ -511,8 +631,14 @@ def build(works, tmdb, index, tree):
         # Poster paths are half the catalog's weight and can't be compressed (random ids), so they
         # live in posters.json, loaded alongside. Titles on the home page (displays, boutique
         # labels) keep theirs here.
-        poster = ((info or {}).get("poster") or "")[1:].removesuffix(".jpg")
+        # Titles show their English poster; a foreign title's original-language one is the alternative.
+        bare = lambda path: (path or "")[1:].removesuffix(".jpg")
+        poster = bare((info or {}).get("poster") or (info or {}).get("poster_orig"))
         posters.append(poster)
+        if info and info.get("poster_orig") and info.get("poster"):
+            posters_orig[len(out_works)] = bare(info["poster_orig"])
+        if (kind, tid) in blur:
+            explicit.append(len(out_works))
         on_display = any(r[2] >= 0 for r in rs)
         row = [KIND_CODE[kind], tid, title, (info or {}).get("year") or 0,
                poster if on_display or boutique else "",
@@ -557,18 +683,24 @@ def build(works, tmdb, index, tree):
         #  poster path (only for titles on a display or boutique label; the rest are in posters.json), popularity,
         #  [[format, shelf (-1: only on a display), display (-1: none)]], original title?]
         "works": out_works,
+        # works TMDB flags as adult or tags erotic; the site treats these and everything on the store's
+        # "Adult Theme" shelves as adult (posters blurred by default, or hidden)
+        "explicit": explicit,
     }
     (SITE / "data").mkdir(parents=True, exist_ok=True)
     (SITE / "data" / "catalog.json").write_text(json.dumps(catalog, ensure_ascii=False, separators=(",", ":")))
     # one path per catalog title, in the same order; "built" ties the two files together
     (SITE / "data" / "posters.json").write_text(json.dumps({"built": catalog["built"], "posters": posters}, separators=(",", ":")))
+    # original-language posters for foreign titles, {catalog index: path}; loaded only when a visitor picks them
+    (SITE / "data" / "posters-orig.json").write_text(json.dumps({"built": catalog["built"], "posters": posters_orig}, separators=(",", ":")))
     for (kind, n), d in details.items():
         p = SITE / "data" / "details" / kind / f"{n:03d}.json"
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(json.dumps(d, ensure_ascii=False, separators=(",", ":")))
     size = (SITE / "data" / "catalog.json").stat().st_size
     psize = (SITE / "data" / "posters.json").stat().st_size
-    log(f"wrote {len(out_works)} titles, {len(shelves)} shelves; catalog.json {size / 1e6:.1f} MB, posters.json {psize / 1e6:.1f} MB")
+    log(f"wrote {len(out_works)} titles, {len(shelves)} shelves; catalog.json {size / 1e6:.1f} MB, posters.json {psize / 1e6:.1f} MB, "
+        f"{len(posters_orig)} titles with an original-language poster, {len(explicit)} blurred as adult or erotic")
 
 
 def main():
@@ -591,8 +723,11 @@ def main():
         tmdb_token = lambda: None
     terms = fetch_store_terms(refresh=not args.no_fetch or not (CACHE / "store-terms.json").exists())
     tmdb = enrich(works)
+    adult = fetch_adult_ids(refresh=not args.no_fetch or not (CACHE / "adult-ids.json").exists())
+    blur = adult | fetch_erotic_ids()
+    blur = {k for k in blur if BLUR_FIXES.get(k, True)} | {k for k, v in BLUR_FIXES.items() if v}
     everything = {**works, **unmatched}
-    build(everything, tmdb, index, shelf_tree(everything, terms))
+    build(everything, tmdb, index, shelf_tree(everything, terms), blur)
 
 
 if __name__ == "__main__":

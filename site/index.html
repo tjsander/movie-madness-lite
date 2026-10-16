@@ -482,7 +482,8 @@ function scopeLabel({ kind, name }) {
 
 /* ------------------------------------------------------------------ routing */
 
-const enc = s => encodeURIComponent(s).replace(/%20/g, "+");
+// "!" separates the route from an open title in the hash, so it must be escaped in names ("Shout! / Scream Factory")
+const enc = s => encodeURIComponent(s).replace(/%20/g, "+").replace(/!/g, "%21");
 const dec = s => decodeURIComponent(s.replace(/\+/g, "%20"));
 const hrefSection = n => "#/section/" + enc(n);
 const hrefShelf = si => "#/shelf/" + enc(shelves[si].path);
